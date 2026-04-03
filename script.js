@@ -8,7 +8,6 @@ const firebaseConfig = {
     databaseURL: "https://sadari-1b34d-default-rtdb.firebaseio.com"
 };
 
-// 안정화된 예전 연결 방식으로 교체
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const roomRef = db.ref('room');
@@ -33,17 +32,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('ladder-canvas');
     const ctx = canvas.getContext('2d');
 
-    // Modals
     const resultModal = document.getElementById('result-modal');
     const resultTableBody = document.querySelector('#result-table tbody');
     
-    // Colors
     const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB', '#F1C40F', '#E67E22'];
     const lineColor = '#ffd1f3';
     
     let localData = null;
     let canvasWidth, canvasHeight, colSpacing;
     let isAdmin = false;
+
+    let isAnimating = false;
+    let currentlyAnimatingPlayer = null;
+    let myTriggeredPlayer = null;
 
     // --- Firebase Sync ---
     roomRef.on('value', (snapshot) => {
@@ -54,45 +55,67 @@ document.addEventListener('DOMContentLoaded', () => {
             gameSection.style.display = 'none';
             resultModal.style.display = 'none';
             updateForms(); 
+            isAnimating = false;
+            currentlyAnimatingPlayer = null;
+            myTriggeredPlayer = null;
         } else {
             localData = data;
             configSection.style.display = 'none';
             gameSection.style.display = 'block';
+
+            if (isAdmin) {
+                adminControls.style.display = 'block';
+                if (data.status === 'waiting') {
+                    document.getElementById('start-game-btn').style.display = 'inline-block';
+                    document.getElementById('force-finish-btn').style.display = 'none';
+                } else if (data.status === 'playing') {
+                    document.getElementById('start-game-btn').style.display = 'none';
+                    document.getElementById('force-finish-btn').style.display = 'inline-block';
+                } else {
+                    document.getElementById('start-game-btn').style.display = 'none';
+                    document.getElementById('force-finish-btn').style.display = 'none';
+                }
+            } else {
+                adminControls.style.display = 'none';
+            }
             
             if (data.status === 'waiting') {
                 statusText.innerText = "참가자들이 대기 중입니다!";
-                gameHeader.innerText = "현재 사다리가 세팅되었습니다. 방장의 시작을 기다려주세요.";
+                gameHeader.innerText = "현재 사다리가 세팅되었습니다. 방장의 오픈을 기다려주세요.";
                 setupLadderBoard(data);
-                drawBaseLadder();
+                drawBaseLadderWithPlayed(data);
             } 
             else if (data.status === 'playing') {
-                statusText.innerText = "사다리타기 진행 중! 🚀";
-                gameHeader.innerText = "결과를 확인해 보세요!";
-                setupLadderBoard(data);
-                startSimultaneousAnimation(data);
+                statusText.innerText = "릴레이 사다리 진행 중! 🚀";
+                gameHeader.innerText = "내 이름표를 클릭해서 사다리를 출발하세요!";
+                setupLadderBoard(data); // Re-render nodes (to disable played ones)
+                
+                if (data.activePlayer !== undefined && data.activePlayer !== null) {
+                    if (currentlyAnimatingPlayer !== data.activePlayer) {
+                        startSingleAnimation(data.activePlayer, data);
+                    }
+                } else {
+                    if (!isAnimating) drawBaseLadderWithPlayed(data);
+                }
             }
             else if (data.status === 'finished') {
-                statusText.innerText = "게임 종료!";
-                gameHeader.innerText = "게임이 종료되었습니다.";
+                statusText.innerText = "모든 릴레이 종료!";
+                gameHeader.innerText = "모두의 게임이 종료되었습니다.";
                 setupLadderBoard(data);
+                drawBaseLadderWithPlayed(data);
                 showResultModal(data.finalMatches);
             }
         }
     }, (error) => {
-        // 권한이나 통신에 문제가 생겼을 때 이곳에서 에러 표시
         statusText.innerText = "데이터 접근 권한 에러: " + (error.message || error);
-        console.error("Firebase error: ", error);
-        alert("원격 통신에 실패했습니다. Firebase 권한 상태를 확인해주세요.");
     });
 
-    // --- CSV Download & Upload ---
     if(downloadCsvBtn) {
         downloadCsvBtn.addEventListener('click', () => {
             const csvContent = "\uFEFF이름,결과\n참가자1,당첨 😎\n참가자2,꽝 😭\n참가자3,꽝 😭\n참가자4,선발대 🏃\n참가자5,휴식 ☕";
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
-            const url = URL.createObjectURL(blob);
-            link.setAttribute("href", url);
+            link.setAttribute("href", URL.createObjectURL(blob));
             link.setAttribute("download", "사다리타기_명단양식.csv");
             document.body.appendChild(link);
             link.click();
@@ -108,7 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const text = ev.target.result;
             const rows = text.split('\n').map(r => r.trim()).filter(r => r);
             let actualRows = rows.filter(r => !r.includes('이름,결과') && !r.includes('이름\t결과'));
-            
             let count = actualRows.length;
             if (count > 10) count = 10;
             if (count < 2) count = 2;
@@ -117,8 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             actualRows.slice(0, count).forEach((row, i) => {
                 let parts = row.split(',');
-                if(parts.length < 2) parts = row.split('\t'); // fallback for excel copy paste
-
+                if(parts.length < 2) parts = row.split('\t');
                 if (parts[0]) document.getElementById(`player-${i}`).value = parts[0].trim();
                 if (parts[1]) document.getElementById(`result-${i}`).value = parts[1].trim();
             });
@@ -127,13 +148,11 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.readAsText(file);
     });
 
-    // --- Form handling ---
     function updateForms() {
         let count = parseInt(playerCountInput.value);
         if (count < 2) count = 2;
         if (count > 10) count = 10;
         playerCountInput.value = count;
-
         playersContainer.innerHTML = '<h3>참가자</h3>';
         resultsContainer.innerHTML = '<h3>결과</h3>';
         const defaultResults = ['당첨 😎', '꽝 😭', '선발대 🏃', '교육참석 📚', '간식쏘기 🍕', '휴식 ☕', '꽝 😭', '당첨 😎', '선발대 🏃', '꽝 😭'];
@@ -154,7 +173,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     playerCountInput.addEventListener('change', updateForms);
 
-    // --- Create Room ---
     document.getElementById('open-room-btn').addEventListener('click', () => {
         const count = parseInt(playerCountInput.value);
         let players = [], results = [];
@@ -192,33 +210,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         isAdmin = true; 
-        adminControls.style.display = 'block';
-
+        
         roomRef.set({
             status: 'waiting',
             players,
             results,
             lines: lines.length ? lines : false,
             lineCount: count,
-            finalMatches
-        }).catch(e => alert("방 생성 권한 거부: " + e.message));
+            finalMatches,
+            played: new Array(count).fill(false),
+            activePlayer: null
+        }).catch(e => alert("방 생성 실패: " + e.message));
     });
 
-    // --- Admin Controls ---
     document.getElementById('start-game-btn').addEventListener('click', () => {
         roomRef.update({ status: 'playing' }).catch(e => alert(e.message));
-        document.getElementById('start-game-btn').disabled = true;
+    });
+
+    document.getElementById('force-finish-btn').addEventListener('click', () => {
+        let allPlayed = new Array(localData.lineCount).fill(true);
+        roomRef.update({ status: 'finished', played: allPlayed, activePlayer: null }).catch(e => alert(e.message));
     });
 
     document.getElementById('reset-game-btn').addEventListener('click', () => {
         roomRef.remove().catch(e => alert(e.message));
-        resultModal.style.display = 'none';
-        isAdmin = false;
-        adminControls.style.display = 'none';
-        document.getElementById('start-game-btn').disabled = false;
     });
 
-    // --- Rendering ---
     function setupLadderBoard(data) {
         startsContainer.innerHTML = '';
         endsContainer.innerHTML = '';
@@ -226,9 +243,39 @@ document.addEventListener('DOMContentLoaded', () => {
             const el = document.createElement('div');
             el.className = 'start-node';
             el.innerText = p;
-            el.style.borderBottom = `4px solid ${colors[idx % colors.length]}`;
+            
+            if (data.played && data.played[idx]) {
+                // 이미 탄 사람
+                el.style.backgroundColor = '#f0f0f0';
+                el.style.color = '#999';
+                el.style.borderBottom = `4px solid ${colors[idx % colors.length]}50`; // 반투명
+                el.style.boxShadow = 'none';
+                el.style.cursor = 'default';
+            } else {
+                // 안 탄 사람
+                el.style.borderBottom = `4px solid ${colors[idx % colors.length]}`;
+                el.style.cursor = 'pointer';
+                el.addEventListener('click', () => {
+                    if (localData.status !== 'playing') return;
+                    if (localData.activePlayer !== undefined && localData.activePlayer !== null) {
+                        alert("다른 분이 방금 사다리를 출발시켰습니다! 잠시만 기다려주세요 👀🍿");
+                        return;
+                    }
+                    if (localData.played && localData.played[idx]) return;
+
+                    myTriggeredPlayer = idx;
+                    let newPlayed = [...(localData.played || [])];
+                    newPlayed[idx] = true;
+                    
+                    roomRef.update({ 
+                        activePlayer: idx,
+                        played: newPlayed
+                    });
+                });
+            }
             startsContainer.appendChild(el);
         });
+
         data.results.forEach((r, idx) => {
             const el = document.createElement('div');
             el.className = 'end-node';
@@ -252,11 +299,11 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('resize', () => {
         if (localData) {
             resizeCanvas(localData.lineCount);
-            if(localData.status !== 'playing') drawBaseLadder();
+            if(!isAnimating) drawBaseLadderWithPlayed(localData);
         }
     });
 
-    function drawBaseLadder() {
+    function drawBaseLadderWithPlayed(data) {
         if(!localData) return;
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
         ctx.lineWidth = 4;
@@ -273,6 +320,23 @@ document.addEventListener('DOMContentLoaded', () => {
             const y = line.y * canvasHeight;
             ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke();
         });
+
+        // 궤적을 이미 남긴 플레이어의 선을 반투명하게 덧그림
+        if (data.played) {
+            data.played.forEach((isPlayed, idx) => {
+                if (isPlayed && idx !== currentlyAnimatingPlayer) {
+                    const pts = buildPathPts(idx);
+                    ctx.beginPath();
+                    ctx.lineWidth = 6;
+                    ctx.strokeStyle = colors[idx % colors.length] + '60'; // 60% 투명도 (Hex 60)
+                    ctx.moveTo(pts[0].x, pts[0].y);
+                    for(let i=1; i<pts.length; i++) {
+                        ctx.lineTo(pts[i].x, pts[i].y);
+                    }
+                    ctx.stroke();
+                }
+            });
+        }
     }
 
     function buildPathPts(startCol) {
@@ -306,76 +370,71 @@ document.addEventListener('DOMContentLoaded', () => {
         return { total, segments };
     }
 
-    let isAnimating = false;
-    function startSimultaneousAnimation(data) {
+    function startSingleAnimation(idx, data) {
         if(isAnimating) return;
         isAnimating = true;
+        currentlyAnimatingPlayer = idx;
 
-        const allPaths = [];
-        let maxDist = 0;
-
-        for(let i=0; i<data.lineCount; i++) {
-            const pts = buildPathPts(i);
-            const pData = getPathData(pts);
-            if(pData.total > maxDist) maxDist = pData.total;
-            allPaths.push({ ...pData, color: colors[i % colors.length] });
-        }
-
+        const pts = buildPathPts(idx);
+        const pData = getPathData(pts);
+        
         let currentDist = 0;
-        const speed = canvasHeight * 0.015; 
+        const speed = canvasHeight * 0.018; 
 
         function animLoop() {
             currentDist += speed;
-            if(currentDist >= maxDist) currentDist = maxDist;
+            if(currentDist >= pData.total) currentDist = pData.total;
 
-            drawBaseLadder();
+            drawBaseLadderWithPlayed(data);
 
-            let allFinished = true;
+            ctx.beginPath();
+            ctx.lineWidth = 6;
+            ctx.strokeStyle = colors[idx % colors.length];
+            
+            let distLeft = currentDist;
+            let lastX = pData.segments[0].p1.x, lastY = pData.segments[0].p1.y;
+            ctx.moveTo(lastX, lastY);
 
-            allPaths.forEach(path => {
-                if(currentDist < path.total) allFinished = false;
+            for(let seg of pData.segments) {
+                if (distLeft >= seg.dist) {
+                    ctx.lineTo(seg.p2.x, seg.p2.y);
+                    distLeft -= seg.dist;
+                    lastX = seg.p2.x; lastY = seg.p2.y;
+                } else {
+                    const ratio = distLeft / seg.dist;
+                    lastX = seg.p1.x + (seg.p2.x - seg.p1.x)*ratio;
+                    lastY = seg.p1.y + (seg.p2.y - seg.p1.y)*ratio;
+                    ctx.lineTo(lastX, lastY);
+                    break;
+                }
+            }
+            ctx.stroke();
 
-                ctx.beginPath();
-                ctx.lineWidth = 6;
-                ctx.strokeStyle = path.color;
-                
-                let distLeft = currentDist;
-                let lastX = path.segments[0].p1.x, lastY = path.segments[0].p1.y;
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(lastX, lastY, 6, 0, Math.PI*2);
+            ctx.fill();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = colors[idx % colors.length];
+            ctx.stroke();
 
-                ctx.moveTo(lastX, lastY);
+            if (currentDist >= pData.total) {
+                isAnimating = false;
+                currentlyAnimatingPlayer = null;
 
-                for(let seg of path.segments) {
-                    if (distLeft >= seg.dist) {
-                        ctx.lineTo(seg.p2.x, seg.p2.y);
-                        distLeft -= seg.dist;
-                        lastX = seg.p2.x; lastY = seg.p2.y;
-                    } else {
-                        const ratio = distLeft / seg.dist;
-                        lastX = seg.p1.x + (seg.p2.x - seg.p1.x)*ratio;
-                        lastY = seg.p1.y + (seg.p2.y - seg.p1.y)*ratio;
-                        ctx.lineTo(lastX, lastY);
-                        distLeft = 0;
-                        break;
+                if (myTriggeredPlayer === idx) {
+                    myTriggeredPlayer = null;
+                    roomRef.update({ activePlayer: null });
+                }
+
+                // 전체가 끝났는지 검사 (오직 방장이나 마지막 진행자만 호출하도록)
+                if (data.played && !data.played.includes(false)) {
+                    // 모두 끝났으면 status 변경
+                    if (isAdmin) {
+                        roomRef.update({ status: 'finished' });
                     }
                 }
-                ctx.stroke();
 
-                ctx.fillStyle = '#fff';
-                ctx.beginPath();
-                ctx.arc(lastX, lastY, 5, 0, Math.PI*2);
-                ctx.fill();
-                ctx.lineWidth = 3;
-                ctx.strokeStyle = path.color;
-                ctx.stroke();
-            });
-
-            if(allFinished) {
-                isAnimating = false;
-                if(isAdmin) {
-                    roomRef.update({ status: 'finished' }).catch(e => console.error(e));
-                } else if(data.status === 'finished') {
-                    showResultModal(data.finalMatches);
-                }
             } else {
                 requestAnimationFrame(animLoop);
             }
@@ -395,18 +454,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('close-modal-btn').addEventListener('click', () => {
         resultModal.style.display = 'none';
-        drawBaseLadder(); 
+        drawBaseLadderWithPlayed(localData); 
     });
 
-    // 누구나 새 게임을 바로 파기 쉽도록 모달에 추가된 버튼
     document.getElementById('restart-game-btn').addEventListener('click', () => {
         roomRef.remove().catch(e => alert(e.message));
         resultModal.style.display = 'none';
-        isAdmin = false;
-        adminControls.style.display = 'none';
-        if (document.getElementById('start-game-btn')) {
-            document.getElementById('start-game-btn').disabled = false;
-        }
     });
 
     document.getElementById('copy-result-btn').addEventListener('click', () => {
