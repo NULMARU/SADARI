@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🌸 봄맞이 사다리타기 🌸</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>🌸 봄맞이 사다리타기</h1>
+            <p>행사 선발대, 교육 참석자 등 즐겁게 정해보세요!</p>
+        </header>
+
+        <section class="config-section">
+            <div class="control-group">
+                <label for="player-count">참가 인원 (2~10명):</label>
+                <input type="number" id="player-count" min="2" max="10" value="4">
+            </div>
+            
+            <div class="inputs-container">
+                <div class="players-inputs" id="players-inputs">
+                    <!-- JS에서 동적 추가 -->
+                </div>
+                <div class="results-inputs" id="results-inputs">
+                    <!-- JS에서 동적 추가 -->
+                </div>
+            </div>
+
+            <button id="generate-btn" class="primary-btn">사다리 만들기 시작!</button>
+        </section>
+
+        <section class="game-section" id="game-section" style="display: none;">
+            <div class="game-board">
+                <div class="starts" id="starts-container"></div>
+                <div class="canvas-container">
+                    <canvas id="ladder-canvas"></canvas>
+                </div>
+                <div class="ends" id="ends-container"></div>
+            </div>
+            <button id="reset-btn" class="secondary-btn">다시 설정하기</button>
+        </section>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
