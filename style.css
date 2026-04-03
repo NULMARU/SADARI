@@ -8,18 +8,12 @@
     --glass-bg: rgba(255, 255, 255, 0.7);
     --glass-border: rgba(255, 255, 255, 0.5);
     --line-color: #ffd1f3;
-    --path-color: #ff6b6b;
 }
 
-* {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-    /* 폰트: 시스템 기본 또는 Pretendard 사용 */
-    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: 'Pretendard', sans-serif;
     color: var(--text-main);
     background: linear-gradient(135deg, var(--spring-pink) 0%, var(--spring-yellow) 50%, var(--spring-green) 100%);
     min-height: 100vh;
@@ -32,230 +26,83 @@ body {
 .app-container {
     background: var(--glass-bg);
     backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
     border: 1px solid var(--glass-border);
     border-radius: 20px;
     padding: 40px;
     width: 100%;
-    max-width: 800px;
+    max-width: 900px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
     text-align: center;
+    position: relative;
+    overflow: hidden;
 }
 
 header h1 {
     font-size: 2.2rem;
-    margin-bottom: 15px;
-    color: var(--spring-pink-deep);
-    text-shadow: 1px 1px 2px rgba(255, 255, 255, 0.7);
-}
-
-header p {
-    font-size: 1rem;
-    margin-bottom: 30px;
-    color: #666;
-    font-weight: 600;
-}
-
-.config-section {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-}
-
-.control-group {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 15px;
-    background: rgba(255,255,255,0.5);
-    padding: 15px;
-    border-radius: 12px;
-}
-
-.control-group label {
-    font-weight: bold;
-    color: var(--spring-pink-deep);
-}
-
-.control-group input {
-    width: 70px;
-    padding: 8px;
-    border: 2px solid var(--spring-pink-dark);
-    border-radius: 8px;
-    font-size: 1.1rem;
-    text-align: center;
-    background: white;
-    outline: none;
-    transition: 0.3s;
-}
-
-.control-group input:focus {
-    box-shadow: 0 0 0 3px rgba(255, 123, 172, 0.2);
-}
-
-.inputs-container {
-    display: flex;
-    justify-content: space-between;
-    gap: 20px;
-}
-
-.players-inputs, .results-inputs {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    background: rgba(255,255,255,0.4);
-    padding: 20px;
-    border-radius: 12px;
-}
-
-.players-inputs h3, .results-inputs h3 {
     margin-bottom: 10px;
     color: var(--spring-pink-deep);
-    font-size: 1.1rem;
 }
 
-.input-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
+header p { font-size: 1.1rem; color: #555; font-weight: 600; margin-bottom: 25px; }
 
-.input-row span {
-    width: 30px;
-    height: 30px;
-    background-color: var(--spring-pink-dark);
-    color: white;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.9rem;
-    font-weight: bold;
-    flex-shrink: 0;
-}
-
-.input-row input {
-    flex: 1;
-    padding: 10px 12px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    outline: none;
-    transition: 0.3s;
-    font-size: 0.95rem;
-}
-
-.input-row input:focus {
-    border-color: var(--spring-pink-deep);
-    box-shadow: 0 0 0 2px rgba(255, 123, 172, 0.2);
-}
-
-button {
-    font-family: inherit;
-    cursor: pointer;
-    border: none;
-    border-radius: 25px;
-    padding: 14px 35px;
-    font-size: 1.1rem;
-    font-weight: bold;
-    transition: all 0.3s ease;
-}
-
-.primary-btn {
-    background: linear-gradient(45deg, var(--spring-pink-deep), #ffb9e6);
-    color: white;
-    box-shadow: 0 4px 15px rgba(255, 123, 172, 0.4);
-    margin-top: 20px;
-    align-self: center;
-}
-
-.primary-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(255, 123, 172, 0.6);
-}
-
-.secondary-btn {
-    background: white;
-    color: var(--spring-pink-deep);
-    border: 2px solid var(--spring-pink-deep);
-    margin-top: 30px;
-}
-
-.secondary-btn:hover {
-    background: #fffafa;
-}
-
-.game-section {
-    margin-top: 10px;
-}
-
-.game-board {
-    position: relative;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-}
-
-.starts, .ends {
-    display: flex;
-    justify-content: space-around;
-    padding: 0;
-    z-index: 2;
-    position: relative;
-    height: 40px;
-}
-
-.start-node, .end-node {
-    flex: 1;
-    max-width: 70px;
-    margin: 0 4px;
-    padding: 8px 5px;
-    text-align: center;
+.info-card {
+    background: rgba(255,123,172,0.1);
+    padding: 20px;
     border-radius: 12px;
+    border: 1px dashed var(--spring-pink-deep);
+    margin-bottom: 20px;
+}
+.info-card h3 { color: var(--spring-pink-deep); margin-bottom: 8px; }
+.csv-upload-box { margin-top: 15px; }
+
+.csv-btn {
     background: white;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    font-size: 0.9rem;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: 2px solid var(--spring-pink-deep);
+    color: var(--spring-pink-deep);
     font-weight: bold;
-    border: 2px solid transparent;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    user-select: none;
-    transition: all 0.3s;
-}
-
-.start-node {
     cursor: pointer;
+    display: inline-block;
+    transition: 0.3s;
 }
+.csv-btn:hover { background: var(--spring-pink-deep); color: white; }
 
-.start-node:hover {
-    transform: translateY(-5px);
-    border-color: var(--spring-pink-deep);
-    box-shadow: 0 6px 12px rgba(255, 123, 172, 0.2);
-}
+.config-section { display: flex; flex-direction: column; gap: 20px; }
+.control-group { background: rgba(255,255,255,0.5); padding: 15px; border-radius: 12px; display: flex; justify-content: center; gap: 15px; align-items: center; }
+.control-group input { width: 70px; padding: 8px; border: 2px solid var(--spring-pink-dark); border-radius: 8px; text-align: center; font-size: 1.1rem; }
 
-.start-node.active {
-    background: var(--spring-pink-deep);
-    color: white;
-    border-color: var(--spring-pink-deep);
-    box-shadow: 0 0 15px rgba(255, 123, 172, 0.5);
-}
+.inputs-container { display: flex; justify-content: space-between; gap: 20px; }
+.players-inputs, .results-inputs { flex: 1; display: flex; flex-direction: column; gap: 10px; background: rgba(255,255,255,0.4); padding: 15px; border-radius: 12px; }
+.players-inputs h3, .results-inputs h3 { color: var(--spring-pink-deep); }
 
-.end-node.active {
-    background: var(--spring-yellow);
-    border-color: var(--spring-pink-deep);
-    box-shadow: 0 0 15px rgba(255, 123, 172, 0.5);
-}
+.input-row { display: flex; align-items: center; gap: 8px; }
+.input-row span { width: 28px; height: 28px; background: var(--spring-pink-dark); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: bold; }
+.input-row input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; outline: none; font-size: 0.95rem; }
 
-.canvas-container {
-    position: relative;
-    width: 100%;
-    height: 400px;
-    margin: 10px 0;
-}
+button { cursor: pointer; border: none; border-radius: 25px; padding: 14px 35px; font-size: 1.1rem; font-weight: bold; font-family: inherit; transition: all 0.3s ease; }
+.primary-btn { background: linear-gradient(45deg, var(--spring-pink-deep), #ffb9e6); color: white; box-shadow: 0 4px 15px rgba(255, 123, 172, 0.4); }
+.primary-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(255, 123, 172, 0.6); }
+.secondary-btn { background: white; color: var(--text-main); border: 2px solid #ccc; margin-left: 10px; }
 
-#ladder-canvas {
-    width: 100%;
-    height: 100%;
-    display: block;
-}
+.game-header { font-size: 1.3rem; font-weight: bold; color: #ff3b7c; margin-bottom: 20px; padding: 15px; background: rgba(255,255,255,0.6); border-radius: 12px; }
+
+.game-board { position: relative; width: 100%; display: flex; flex-direction: column; }
+.starts, .ends { display: flex; justify-content: space-around; padding: 0; z-index: 2; position: relative; height: 40px; }
+
+.start-node, .end-node { flex: 1; max-width: 80px; margin: 0 4px; padding: 8px 5px; text-align: center; border-radius: 12px; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.1); font-size: 0.9rem; font-weight: bold; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border: 2px solid transparent; }
+
+.canvas-container { position: relative; width: 100%; height: 500px; margin: 15px 0; }
+#ladder-canvas { width: 100%; height: 100%; display: block; }
+.admin-controls { margin-top: 30px; }
+
+/* Modal */
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); display: flex; justify-content: center; align-items: center; z-index: 100; backdrop-filter: blur(4px); }
+.modal-content { background: white; padding: 40px; border-radius: 20px; width: 90%; max-width: 500px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+.modal-content h2 { color: var(--spring-pink-deep); margin-bottom: 20px; font-size: 1.8rem; }
+.table-container { max-height: 400px; overflow-y: auto; margin-bottom: 20px; border: 1px solid #eee; border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: center; font-size: 1.1rem; }
+th { background: var(--spring-pink); color: var(--text-main); font-weight: bold; position: sticky; top: 0; }
+tr:last-child td { border-bottom: none; }
+.modal-actions { display: flex; justify-content: center; gap: 15px; margin-top: 20px; }
