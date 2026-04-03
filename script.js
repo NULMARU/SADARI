@@ -46,6 +46,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentlyAnimatingPlayer = null;
     let myTriggeredPlayer = null;
 
+    // 숨겨진 관리자 권한 복구 (제목 더블클릭)
+    document.querySelector('header h1').addEventListener('dblclick', () => {
+        if(localData) {
+            isAdmin = true;
+            localStorage.setItem('sadari_admin', 'true');
+            adminControls.style.display = 'block';
+            alert("관리자(방장) 제어판이 복구되었습니다! 🛠️");
+            roomRef.update({ _lastAdminAccess: Date.now() }).catch(()=>{});
+        }
+    });
+
     // --- Firebase Sync ---
     roomRef.on('value', (snapshot) => {
         const data = snapshot.val();
@@ -58,10 +69,17 @@ document.addEventListener('DOMContentLoaded', () => {
             isAnimating = false;
             currentlyAnimatingPlayer = null;
             myTriggeredPlayer = null;
+            isAdmin = false;
+            localStorage.removeItem('sadari_admin');
         } else {
             localData = data;
             configSection.style.display = 'none';
             gameSection.style.display = 'block';
+
+            // 브라우저 새로고침 시 방장 권한 복구
+            if (localStorage.getItem('sadari_admin') === 'true') {
+                isAdmin = true;
+            }
 
             if (isAdmin) {
                 adminControls.style.display = 'block';
@@ -210,6 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         isAdmin = true; 
+        localStorage.setItem('sadari_admin', 'true');
         
         roomRef.set({
             status: 'waiting',
