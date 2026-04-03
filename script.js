@@ -398,6 +398,17 @@ document.addEventListener('DOMContentLoaded', () => {
         drawBaseLadder(); 
     });
 
+    // 누구나 새 게임을 바로 파기 쉽도록 모달에 추가된 버튼
+    document.getElementById('restart-game-btn').addEventListener('click', () => {
+        roomRef.remove().catch(e => alert(e.message));
+        resultModal.style.display = 'none';
+        isAdmin = false;
+        adminControls.style.display = 'none';
+        if (document.getElementById('start-game-btn')) {
+            document.getElementById('start-game-btn').disabled = false;
+        }
+    });
+
     document.getElementById('copy-result-btn').addEventListener('click', () => {
         const text = localData.finalMatches.map(m => `${m.player} : ${m.result}`).join('\n');
         navigator.clipboard.writeText("🌸 웹 사다리타기 결과 🌸\n" + text).then(() => {
