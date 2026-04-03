@@ -1,6 +1,3 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
-import { getDatabase, ref, set, onValue, update, remove } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-database.js";
-
 const firebaseConfig = {
     apiKey: "AIzaSyCq1xjPaoUX6RY1_HpTUivo69lWXWuNqKQ",
     authDomain: "sadari-1b34d.firebaseapp.com",
@@ -8,12 +5,13 @@ const firebaseConfig = {
     storageBucket: "sadari-1b34d.firebasestorage.app",
     messagingSenderId: "576169886908",
     appId: "1:576169886908:web:9661f1c92117027a60bcb9",
-    databaseURL: "https://sadari-1b34d-default-rtdb.firebaseio.com" // 수동 추가
+    databaseURL: "https://sadari-1b34d-default-rtdb.firebaseio.com"
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
-const roomRef = ref(db, 'room');
+// 안정화된 예전 연결 방식으로 교체
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const roomRef = db.ref('room');
 
 document.addEventListener('DOMContentLoaded', () => {
     const configSection = document.getElementById('config-section');
@@ -38,7 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultModal = document.getElementById('result-modal');
     const resultTableBody = document.querySelector('#result-table tbody');
     
-    // Colors for multiple lines
+    // Colors
     const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB', '#F1C40F', '#E67E22'];
     const lineColor = '#ffd1f3';
     
@@ -47,17 +45,15 @@ document.addEventListener('DOMContentLoaded', () => {
     let isAdmin = false;
 
     // --- Firebase Sync ---
-    onValue(roomRef, (snapshot) => {
+    roomRef.on('value', (snapshot) => {
         const data = snapshot.val();
         if (!data) {
-            // No room exists. Show Config to first person.
             statusText.innerText = "새 게임 방을 생성해주세요.";
             configSection.style.display = 'flex';
             gameSection.style.display = 'none';
             resultModal.style.display = 'none';
-            updateForms(); // init default
+            updateForms(); 
         } else {
-            // Room exists!
             localData = data;
             configSection.style.display = 'none';
             gameSection.style.display = 'block';
@@ -81,6 +77,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 showResultModal(data.finalMatches);
             }
         }
+    }, (error) => {
+        // 권한이나 통신에 문제가 생겼을 때 이곳에서 에러 표시
+        statusText.innerText = "데이터 접근 권한 에러: " + (error.message || error);
+        console.error("Firebase error: ", error);
+        alert("원격 통신에 실패했습니다. Firebase 권한 상태를 확인해주세요.");
     });
 
     // --- CSV Upload ---
@@ -93,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const rows = text.split('\n').map(r => r.trim()).filter(r => r);
             let count = rows.length;
             if (count > 10) count = 10;
+            if (count < 2) count = 2;
             playerCountInput.value = count;
             updateForms();
 
@@ -101,7 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parts[0]) document.getElementById(`player-${i}`).value = parts[0].trim();
                 if (parts[1]) document.getElementById(`result-${i}`).value = parts[1].trim();
             });
-            csvUploadInput.value = ''; // reset
+            csvUploadInput.value = ''; 
         };
         reader.readAsText(file);
     });
@@ -142,7 +144,6 @@ document.addEventListener('DOMContentLoaded', () => {
             results.push(document.getElementById(`result-${i}`).value);
         }
 
-        // Generate lines
         let lines = [];
         for (let col = 0; col < count - 1; col++) {
             let numLines = Math.floor(Math.random() * 2) + 2; 
@@ -150,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 let y, valid = false, attempts = 0;
                 while(!valid && attempts < 30) {
                     attempts++;
-                    y = 0.15 + Math.random() * 0.7; // 15%~85%
+                    y = 0.15 + Math.random() * 0.7; 
                     const closeLine = lines.find(l => 
                         (l.col === col || l.col === col - 1 || l.col === col + 1) && Math.abs(l.y - y) < 0.1
                     );
@@ -161,7 +162,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         lines.sort((a,b) => a.y - b.y);
 
-        // Pre-calculate results
         let finalMatches = [];
         for(let start = 0; start < count; start++) {
             let c = start;
@@ -172,27 +172,27 @@ document.addEventListener('DOMContentLoaded', () => {
             finalMatches.push({ player: players[start], result: results[c] });
         }
 
-        isAdmin = true; // only creator sees admin panel
+        isAdmin = true; 
         adminControls.style.display = 'block';
 
-        set(roomRef, {
+        roomRef.set({
             status: 'waiting',
             players,
             results,
-            lines,
+            lines: lines.length ? lines : false,
             lineCount: count,
             finalMatches
-        });
+        }).catch(e => alert("방 생성 권한 거부: " + e.message));
     });
 
     // --- Admin Controls ---
     document.getElementById('start-game-btn').addEventListener('click', () => {
-        update(roomRef, { status: 'playing' });
+        roomRef.update({ status: 'playing' }).catch(e => alert(e.message));
         document.getElementById('start-game-btn').disabled = true;
     });
 
     document.getElementById('reset-game-btn').addEventListener('click', () => {
-        remove(roomRef);
+        roomRef.remove().catch(e => alert(e.message));
         resultModal.style.display = 'none';
         isAdmin = false;
         adminControls.style.display = 'none';
@@ -256,7 +256,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Generate Path points for a player
     function buildPathPts(startCol) {
         let pts = [];
         let curCol = startCol;
@@ -277,7 +276,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return pts;
     }
 
-    // Calculate segments lengths
     function getPathData(pts) {
         let total = 0;
         let segments = [];
@@ -305,7 +303,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         let currentDist = 0;
-        const speed = canvasHeight * 0.015; // Animation speed
+        const speed = canvasHeight * 0.015; 
 
         function animLoop() {
             currentDist += speed;
@@ -333,7 +331,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         distLeft -= seg.dist;
                         lastX = seg.p2.x; lastY = seg.p2.y;
                     } else {
-                        // partial segment
                         const ratio = distLeft / seg.dist;
                         lastX = seg.p1.x + (seg.p2.x - seg.p1.x)*ratio;
                         lastY = seg.p1.y + (seg.p2.y - seg.p1.y)*ratio;
@@ -344,7 +341,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 ctx.stroke();
 
-                // Draw leading dot
                 ctx.fillStyle = '#fff';
                 ctx.beginPath();
                 ctx.arc(lastX, lastY, 5, 0, Math.PI*2);
@@ -357,8 +353,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if(allFinished) {
                 isAnimating = false;
                 if(isAdmin) {
-                    // update status to finished
-                    update(roomRef, { status: 'finished' });
+                    roomRef.update({ status: 'finished' }).catch(e => console.error(e));
                 } else if(data.status === 'finished') {
                     showResultModal(data.finalMatches);
                 }
@@ -369,7 +364,6 @@ document.addEventListener('DOMContentLoaded', () => {
         animLoop();
     }
 
-    // --- Result Modal ---
     function showResultModal(matches) {
         resultTableBody.innerHTML = '';
         matches.forEach(m => {
@@ -382,7 +376,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('close-modal-btn').addEventListener('click', () => {
         resultModal.style.display = 'none';
-        drawBaseLadder(); // keep final lines but close modal
+        drawBaseLadder(); 
     });
 
     document.getElementById('copy-result-btn').addEventListener('click', () => {
