@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const playersContainer = document.getElementById('players-inputs');
     const resultsContainer = document.getElementById('results-inputs');
     const csvUploadInput = document.getElementById('csv-upload');
+    const downloadCsvBtn = document.getElementById('download-csv-btn');
 
     // UI Elements
     const statusText = document.getElementById('room-status-text');
@@ -84,7 +85,21 @@ document.addEventListener('DOMContentLoaded', () => {
         alert("원격 통신에 실패했습니다. Firebase 권한 상태를 확인해주세요.");
     });
 
-    // --- CSV Upload ---
+    // --- CSV Download & Upload ---
+    if(downloadCsvBtn) {
+        downloadCsvBtn.addEventListener('click', () => {
+            const csvContent = "\uFEFF이름,결과\n참가자1,당첨 😎\n참가자2,꽝 😭\n참가자3,꽝 😭\n참가자4,선발대 🏃\n참가자5,휴식 ☕";
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", "사다리타기_명단양식.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+    }
+
     csvUploadInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if(!file) return;
@@ -92,14 +107,18 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.onload = (ev) => {
             const text = ev.target.result;
             const rows = text.split('\n').map(r => r.trim()).filter(r => r);
-            let count = rows.length;
+            let actualRows = rows.filter(r => !r.includes('이름,결과') && !r.includes('이름\t결과'));
+            
+            let count = actualRows.length;
             if (count > 10) count = 10;
             if (count < 2) count = 2;
             playerCountInput.value = count;
             updateForms();
 
-            rows.slice(0, count).forEach((row, i) => {
-                const parts = row.split(',');
+            actualRows.slice(0, count).forEach((row, i) => {
+                let parts = row.split(',');
+                if(parts.length < 2) parts = row.split('\t'); // fallback for excel copy paste
+
                 if (parts[0]) document.getElementById(`player-${i}`).value = parts[0].trim();
                 if (parts[1]) document.getElementById(`result-${i}`).value = parts[1].trim();
             });

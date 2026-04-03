@@ -55,6 +55,20 @@ header p { font-size: 1.1rem; color: #555; font-weight: 600; margin-bottom: 25px
 .info-card h3 { color: var(--spring-pink-deep); margin-bottom: 8px; }
 .csv-upload-box { margin-top: 15px; }
 
+.csv-btn-outline {
+    background: transparent;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--spring-pink-deep);
+    color: var(--spring-pink-deep);
+    font-weight: bold;
+    cursor: pointer;
+    display: inline-block;
+    transition: 0.3s;
+    margin-left: 10px;
+}
+.csv-btn-outline:hover { background: rgba(255,123,172,0.1); }
+
 .csv-btn {
     background: white;
     padding: 10px 20px;
