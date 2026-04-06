@@ -34,6 +34,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const resultModal = document.getElementById('result-modal');
     const resultTableBody = document.querySelector('#result-table tbody');
+    const forceResetBtn = document.getElementById('btn-force-reset');
+
+    if (forceResetBtn) {
+        forceResetBtn.addEventListener('click', () => {
+            if(confirm("기존 게임 방을 삭제하고 새로 만드시겠습니까?")) {
+                roomRef.remove().catch(e => alert(e.message));
+            }
+        });
+    }
     
     const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB', '#F1C40F', '#E67E22'];
     const lineColor = '#ffd1f3';
@@ -62,6 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = snapshot.val();
         if (!data) {
             statusText.innerText = "새 게임 방을 생성해주세요.";
+            if (forceResetBtn) forceResetBtn.style.display = 'none';
             configSection.style.display = 'flex';
             gameSection.style.display = 'none';
             resultModal.style.display = 'none';
@@ -83,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (isAdmin) {
                 adminControls.style.display = 'block';
+                if (forceResetBtn) forceResetBtn.style.display = 'none';
                 if (data.status === 'waiting') {
                     document.getElementById('start-game-btn').style.display = 'inline-block';
                     document.getElementById('force-finish-btn').style.display = 'none';
@@ -95,6 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } else {
                 adminControls.style.display = 'none';
+                if (forceResetBtn) forceResetBtn.style.display = 'inline-block';
             }
             
             if (data.status === 'waiting') {
@@ -146,7 +158,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if(!file) return;
         const reader = new FileReader();
         reader.onload = (ev) => {
-            const text = ev.target.result;
+            const buffer = ev.target.result;
+            // 1. 우선 보편적인 UTF-8로 해석 시도
+            let text = new TextDecoder('utf-8').decode(buffer);
+            // 2. 한글 엑셀 기본 저장방식 (EUC-KR / CP949) 이라 글자가 깨졌는지 확인 (대체 문자  포함 여부)
+            if (text.includes('')) {
+                // 깨졌다면 EUC-KR로 다시 해석
+                text = new TextDecoder('euc-kr').decode(buffer);
+            }
+            
             const rows = text.split('\n').map(r => r.trim()).filter(r => r);
             let actualRows = rows.filter(r => !r.includes('이름,결과') && !r.includes('이름\t결과'));
             let count = actualRows.length;
@@ -163,7 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             csvUploadInput.value = ''; 
         };
-        reader.readAsText(file);
+        reader.readAsArrayBuffer(file);
     });
 
     function updateForms() {
