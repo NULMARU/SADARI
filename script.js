@@ -1,558 +1,95 @@
-const firebaseConfig = {
-    apiKey: "AIzaSyCq1xjPaoUX6RY1_HpTUivo69lWXWuNqKQ",
-    authDomain: "sadari-1b34d.firebaseapp.com",
-    projectId: "sadari-1b34d",
-    storageBucket: "sadari-1b34d.firebasestorage.app",
-    messagingSenderId: "576169886908",
-    appId: "1:576169886908:web:9661f1c92117027a60bcb9",
-    databaseURL: "https://sadari-1b34d-default-rtdb.firebaseio.com"
-};
-
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-const roomRef = db.ref('room');
-
-document.addEventListener('DOMContentLoaded', () => {
-    const configSection = document.getElementById('config-section');
-    const gameSection = document.getElementById('game-section');
-    const playerCountInput = document.getElementById('player-count');
-    const playersContainer = document.getElementById('players-inputs');
-    const resultsContainer = document.getElementById('results-inputs');
-    const csvUploadInput = document.getElementById('csv-upload');
-    const downloadCsvBtn = document.getElementById('download-csv-btn');
-
-    // UI Elements
-    const statusText = document.getElementById('room-status-text');
-    const gameHeader = document.getElementById('game-header');
-    const startsContainer = document.getElementById('starts-container');
-    const endsContainer = document.getElementById('ends-container');
-    const adminControls = document.getElementById('admin-controls');
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🌸 봄맞이 실시간 사다리타기 🌸</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;700&display=swap" rel="stylesheet">
     
-    // Canvas
-    const canvas = document.getElementById('ladder-canvas');
-    const ctx = canvas.getContext('2d');
+    <!-- Firebase 안정화 모듈 구버전(Compat) 로딩 -->
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-database-compat.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>🌸 봄맞이 사다리타기</h1>
+            <p id="room-status-text">서버에 연결 중입니다...</p>
+            <button id="btn-force-reset" class="secondary-btn" style="display: none; padding: 6px 12px; font-size: 0.85rem; margin: 10px auto; border-color: #ffb9e6; color: #ff3b7c;">⚠️ 새로운 방 만들기 (강제 초기화)</button>
+        </header>
 
-    const resultModal = document.getElementById('result-modal');
-    const resultTableBody = document.querySelector('#result-table tbody');
-    const forceResetBtn = document.getElementById('btn-force-reset');
+        <!-- 방 생성 / 설정 영역 (관리자 전용) -->
+        <section class="config-section" id="config-section" style="display: none;">
+            <div class="info-card">
+                <h3>방장 모드 (게임 세팅)</h3>
+                <p>참가자는 최대 10명까지 가능합니다. CSV 파일 업로드를 통해 명단을 한 번에 등록할 수 있습니다.</p>
+                <div class="csv-upload-box">
+                    <label for="csv-upload" class="csv-btn">📁 CSV 일괄 업로드</label>
+                    <input type="file" id="csv-upload" accept=".csv" style="display:none;">
+                    <button id="download-csv-btn" class="csv-btn-outline">📥 양식 다운로드</button>
+                    <p style="font-size: 0.85rem; color: #888; margin-top: 8px;">* 양식 다운로드 후 엑셀에서 명단을 적고 저장하여 업로드하세요!</p>
+                </div>
+            </div>
 
-    if (forceResetBtn) {
-        forceResetBtn.addEventListener('click', () => {
-            if(confirm("기존 게임 방을 삭제하고 새로 만드시겠습니까?")) {
-                roomRef.remove().catch(e => alert(e.message));
-            }
-        });
-    }
+            <div class="control-group">
+                <label for="player-count">참가 인원 (2~10명):</label>
+                <input type="number" id="player-count" min="2" max="10" value="4">
+            </div>
+            
+            <div class="inputs-container">
+                <div class="players-inputs" id="players-inputs"></div>
+                <div class="results-inputs" id="results-inputs"></div>
+            </div>
+
+            <button id="open-room-btn" class="primary-btn">게임 방 열기 (참가자 대기)</button>
+        </section>
+
+        <!-- 실시간 게임 대기 및 진행 영역 -->
+        <section class="game-section" id="game-section" style="display: none;">
+            <div class="game-header" id="game-header"></div>
+            
+            <div class="game-board">
+                <div class="starts" id="starts-container"></div>
+                <div class="canvas-container">
+                    <canvas id="ladder-canvas"></canvas>
+                </div>
+                <div class="ends" id="ends-container"></div>
+            </div>
+
+            <div class="admin-controls" id="admin-controls" style="display: none;">
+                <button id="start-game-btn" class="primary-btn">🚀 릴레이 사다리 오픈 (개별 클릭)</button>
+                <button id="force-finish-btn" class="primary-btn" style="display:none; background: linear-gradient(45deg, #FF6B6B, #FF8E8B);">⏭️ 다같이 결과 보기 (스킵)</button>
+                <button id="reset-game-btn" class="secondary-btn">방 폭파 (초기화)</button>
+            </div>
+        </section>
+    </div>
+
+    <!-- 결과 모달 -->
+    <div class="modal-overlay" id="result-modal" style="display: none;">
+        <div class="modal-content">
+            <h2>🎉 최종 결과 🎉</h2>
+            <div class="table-container">
+                <table id="result-table">
+                    <thead>
+                        <tr>
+                            <th>참가자</th>
+                            <th>결과</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="modal-actions">
+                <button id="copy-result-btn" class="primary-btn">📋 결과 복사하기</button>
+                <button id="restart-game-btn" class="secondary-btn" style="border-color: #ff3b7c; color: #ff3b7c;">🔄 새 게임하기</button>
+                <button id="close-modal-btn" class="secondary-btn">닫기</button>
+            </div>
+        </div>
+    </div>
     
-    const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB', '#F1C40F', '#E67E22'];
-    const lineColor = '#ffd1f3';
-    
-    let localData = null;
-    let canvasWidth, canvasHeight, colSpacing;
-    let isAdmin = false;
-
-    let isAnimating = false;
-    let currentlyAnimatingPlayer = null;
-    let myTriggeredPlayer = null;
-
-    // 숨겨진 관리자 권한 복구 (제목 더블클릭)
-    document.querySelector('header h1').addEventListener('dblclick', () => {
-        if(localData) {
-            isAdmin = true;
-            localStorage.setItem('sadari_admin', 'true');
-            adminControls.style.display = 'block';
-            alert("관리자(방장) 제어판이 복구되었습니다! 🛠️");
-            roomRef.update({ _lastAdminAccess: Date.now() }).catch(()=>{});
-        }
-    });
-
-    // --- Firebase Sync ---
-    roomRef.on('value', (snapshot) => {
-        const data = snapshot.val();
-        if (!data) {
-            statusText.innerText = "새 게임 방을 생성해주세요.";
-            if (forceResetBtn) forceResetBtn.style.display = 'none';
-            configSection.style.display = 'flex';
-            gameSection.style.display = 'none';
-            resultModal.style.display = 'none';
-            updateForms(); 
-            isAnimating = false;
-            currentlyAnimatingPlayer = null;
-            myTriggeredPlayer = null;
-            isAdmin = false;
-            localStorage.removeItem('sadari_admin');
-        } else {
-            localData = data;
-            configSection.style.display = 'none';
-            gameSection.style.display = 'block';
-
-            // 브라우저 새로고침 시 방장 권한 복구
-            if (localStorage.getItem('sadari_admin') === 'true') {
-                isAdmin = true;
-            }
-
-            if (isAdmin) {
-                adminControls.style.display = 'block';
-                if (forceResetBtn) forceResetBtn.style.display = 'none';
-                if (data.status === 'waiting') {
-                    document.getElementById('start-game-btn').style.display = 'inline-block';
-                    document.getElementById('force-finish-btn').style.display = 'none';
-                } else if (data.status === 'playing') {
-                    document.getElementById('start-game-btn').style.display = 'none';
-                    document.getElementById('force-finish-btn').style.display = 'inline-block';
-                } else {
-                    document.getElementById('start-game-btn').style.display = 'none';
-                    document.getElementById('force-finish-btn').style.display = 'none';
-                }
-            } else {
-                adminControls.style.display = 'none';
-                if (forceResetBtn) forceResetBtn.style.display = 'inline-block';
-            }
-            
-            if (data.status === 'waiting') {
-                statusText.innerText = "참가자들이 대기 중입니다!";
-                gameHeader.innerText = "현재 사다리가 세팅되었습니다. 방장의 오픈을 기다려주세요.";
-                setupLadderBoard(data);
-                drawBaseLadderWithPlayed(data);
-            } 
-            else if (data.status === 'playing') {
-                statusText.innerText = "릴레이 사다리 진행 중! 🚀";
-                gameHeader.innerText = "내 이름표를 클릭해서 사다리를 출발하세요!";
-                setupLadderBoard(data); // Re-render nodes (to disable played ones)
-                
-                if (data.activePlayer !== undefined && data.activePlayer !== null) {
-                    if (currentlyAnimatingPlayer !== data.activePlayer) {
-                        startSingleAnimation(data.activePlayer, data);
-                    }
-                } else {
-                    if (!isAnimating) drawBaseLadderWithPlayed(data);
-                }
-            }
-            else if (data.status === 'finished') {
-                statusText.innerText = "모든 릴레이 종료!";
-                gameHeader.innerText = "모두의 게임이 종료되었습니다.";
-                setupLadderBoard(data);
-                drawBaseLadderWithPlayed(data);
-                showResultModal(data.finalMatches);
-            }
-        }
-    }, (error) => {
-        statusText.innerText = "데이터 접근 권한 에러: " + (error.message || error);
-    });
-
-    if(downloadCsvBtn) {
-        downloadCsvBtn.addEventListener('click', () => {
-            const csvContent = "\uFEFF이름,결과\n참가자1,당첨 😎\n참가자2,꽝 😭\n참가자3,꽝 😭\n참가자4,선발대 🏃\n참가자5,휴식 ☕";
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
-            link.setAttribute("href", URL.createObjectURL(blob));
-            link.setAttribute("download", "사다리타기_명단양식.csv");
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        });
-    }
-
-    csvUploadInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            const buffer = ev.target.result;
-
-            // 1. UTF-8 먼저 시도
-            let text = new TextDecoder('utf-8').decode(buffer);
-            
-            // BOM 제거
-            text = text.replace(/^\uFEFF/, '');
-
-            // 2. 한글 깨짐(mojibake) 감지 → 한국 엑셀 기본(CP949)으로 재시도
-            const hasMojibake = text.includes('\uFFFD') || 
-                               /[\x80-\x9F\xA0-\xBF]{2,}/.test(text);
-            if (hasMojibake || (text.length > 20 && text.match(/[가-힣]/) === null)) {
-                try {
-                    text = new TextDecoder('cp949').decode(buffer);
-                    text = text.replace(/^\uFEFF/, '');
-                } catch (err) {
-                    // cp949 실패해도 UTF-8 유지
-                    console.warn("CP949 decoding failed, fallback to UTF-8");
-                }
-            }
-
-            const rows = text.split(/\r?\n/).map(r => r.trim()).filter(r => r.length > 0);
-            
-            // 헤더 행 제외 (더 관대하게)
-            let actualRows = rows.filter(r => {
-                const lower = r.toLowerCase().replace(/\s+/g, '');
-                return !(lower.includes('이름') && lower.includes('결과'));
-            });
-
-            let count = Math.min(Math.max(actualRows.length, 2), 10);
-            playerCountInput.value = count;
-            updateForms();
-
-            // 행 파싱 함수 (콤마 / 탭 / 공백 모두 지원)
-            function parseRow(row) {
-                // 1. 쉼표 구분
-                let parts = row.split(',');
-                if (parts.length >= 2) return parts.map(p => p.trim());
-
-                // 2. 탭 구분
-                parts = row.split('\t');
-                if (parts.length >= 2) return parts.map(p => p.trim());
-
-                // 3. 공백 구분 (가장 흔한 실패 케이스)
-                parts = row.split(/\s+/);
-                if (parts.length >= 2) {
-                    return [
-                        parts[0].trim(),
-                        parts.slice(1).join(' ').trim()
-                    ];
-                }
-
-                return [row.trim(), '']; // fallback
-            }
-
-            actualRows.slice(0, count).forEach((row, i) => {
-                const [player, result] = parseRow(row);
-                if (player) document.getElementById(`player-${i}`).value = player;
-                if (result !== undefined) document.getElementById(`result-${i}`).value = result;
-            });
-
-            csvUploadInput.value = '';
-            console.log('✅ CSV 업로드 성공');
-        };
-
-        reader.readAsArrayBuffer(file);
-    });
-
-    function updateForms() {
-        let count = parseInt(playerCountInput.value);
-        if (count < 2) count = 2;
-        if (count > 10) count = 10;
-        playerCountInput.value = count;
-        playersContainer.innerHTML = '<h3>참가자</h3>';
-        resultsContainer.innerHTML = '<h3>결과</h3>';
-        const defaultResults = ['당첨 😎', '꽝 😭', '선발대 🏃', '교육참석 📚', '간식쏘기 🍕', '휴식 ☕', '꽝 😭', '당첨 😎', '선발대 🏃', '꽝 😭'];
-
-        for (let i = 0; i < count; i++) {
-            playersContainer.innerHTML += `
-                <div class="input-row">
-                    <span>${i+1}</span>
-                    <input type="text" id="player-${i}" value="참가자 ${i+1}">
-                </div>`;
-            const defRes = defaultResults[i % defaultResults.length];
-            resultsContainer.innerHTML += `
-                <div class="input-row">
-                    <span>${i+1}</span>
-                    <input type="text" id="result-${i}" value="${defRes}">
-                </div>`;
-        }
-    }
-    playerCountInput.addEventListener('change', updateForms);
-
-    document.getElementById('open-room-btn').addEventListener('click', () => {
-        const count = parseInt(playerCountInput.value);
-        let players = [], results = [];
-        for (let i = 0; i < count; i++) {
-            players.push(document.getElementById(`player-${i}`).value);
-            results.push(document.getElementById(`result-${i}`).value);
-        }
-
-        let lines = [];
-        for (let col = 0; col < count - 1; col++) {
-            let numLines = Math.floor(Math.random() * 2) + 2; 
-            for (let i = 0; i < numLines; i++) {
-                let y, valid = false, attempts = 0;
-                while(!valid && attempts < 30) {
-                    attempts++;
-                    y = 0.15 + Math.random() * 0.7; 
-                    const closeLine = lines.find(l => 
-                        (l.col === col || l.col === col - 1 || l.col === col + 1) && Math.abs(l.y - y) < 0.1
-                    );
-                    if (!closeLine) valid = true;
-                }
-                if (valid) lines.push({ col, y });
-            }
-        }
-        lines.sort((a,b) => a.y - b.y);
-
-        let finalMatches = [];
-        for(let start = 0; start < count; start++) {
-            let c = start;
-            lines.forEach(l => {
-                if (l.col === c) c++;
-                else if (l.col === c - 1) c--;
-            });
-            finalMatches.push({ player: players[start], result: results[c] });
-        }
-
-        isAdmin = true; 
-        localStorage.setItem('sadari_admin', 'true');
-        
-        roomRef.set({
-            status: 'waiting',
-            players,
-            results,
-            lines: lines.length ? lines : false,
-            lineCount: count,
-            finalMatches,
-            played: new Array(count).fill(false),
-            activePlayer: null
-        }).catch(e => alert("방 생성 실패: " + e.message));
-    });
-
-    document.getElementById('start-game-btn').addEventListener('click', () => {
-        roomRef.update({ status: 'playing' }).catch(e => alert(e.message));
-    });
-
-    document.getElementById('force-finish-btn').addEventListener('click', () => {
-        let allPlayed = new Array(localData.lineCount).fill(true);
-        roomRef.update({ status: 'finished', played: allPlayed, activePlayer: null }).catch(e => alert(e.message));
-    });
-
-    document.getElementById('reset-game-btn').addEventListener('click', () => {
-        roomRef.remove().catch(e => alert(e.message));
-    });
-
-    function setupLadderBoard(data) {
-        startsContainer.innerHTML = '';
-        endsContainer.innerHTML = '';
-        data.players.forEach((p, idx) => {
-            const el = document.createElement('div');
-            el.className = 'start-node';
-            el.innerText = p;
-            
-            if (data.played && data.played[idx]) {
-                // 이미 탄 사람
-                el.style.backgroundColor = '#f0f0f0';
-                el.style.color = '#999';
-                el.style.borderBottom = `4px solid ${colors[idx % colors.length]}50`; // 반투명
-                el.style.boxShadow = 'none';
-                el.style.cursor = 'default';
-            } else {
-                // 안 탄 사람
-                el.style.borderBottom = `4px solid ${colors[idx % colors.length]}`;
-                el.style.cursor = 'pointer';
-                el.addEventListener('click', () => {
-                    if (localData.status !== 'playing') return;
-                    if (localData.activePlayer !== undefined && localData.activePlayer !== null) {
-                        alert("다른 분이 방금 사다리를 출발시켰습니다! 잠시만 기다려주세요 👀🍿");
-                        return;
-                    }
-                    if (localData.played && localData.played[idx]) return;
-
-                    myTriggeredPlayer = idx;
-                    let newPlayed = [...(localData.played || [])];
-                    newPlayed[idx] = true;
-                    
-                    roomRef.update({ 
-                        activePlayer: idx,
-                        played: newPlayed
-                    });
-                });
-            }
-            startsContainer.appendChild(el);
-        });
-
-        data.results.forEach((r, idx) => {
-            const el = document.createElement('div');
-            el.className = 'end-node';
-            el.innerText = r;
-            endsContainer.appendChild(el);
-        });
-        resizeCanvas(data.lineCount);
-    }
-
-    function resizeCanvas(count) {
-        const dpr = window.devicePixelRatio || 1;
-        const rect = canvas.parentElement.getBoundingClientRect();
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
-        ctx.scale(dpr, dpr);
-        canvasWidth = rect.width;
-        canvasHeight = rect.height;
-        colSpacing = canvasWidth / count;
-    }
-
-    let resizeTimer;
-    window.addEventListener('resize', () => {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-            if (localData) {
-                resizeCanvas(localData.lineCount);
-                if(!isAnimating) drawBaseLadderWithPlayed(localData);
-            }
-        }, 150);
-    });
-
-    function drawBaseLadderWithPlayed(data) {
-        if(!localData) return;
-        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = lineColor;
-        ctx.lineCap = 'round';
-        
-        for (let i = 0; i < localData.lineCount; i++) {
-            const x = colSpacing * (i + 0.5);
-            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvasHeight); ctx.stroke();
-        }
-        (localData.lines || []).forEach(line => {
-            const x1 = colSpacing * (line.col + 0.5);
-            const x2 = colSpacing * (line.col + 1.5);
-            const y = line.y * canvasHeight;
-            ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke();
-        });
-
-        // 궤적을 이미 남긴 플레이어의 선을 반투명하게 덧그림
-        if (data.played) {
-            data.played.forEach((isPlayed, idx) => {
-                if (isPlayed && idx !== currentlyAnimatingPlayer) {
-                    const pts = buildPathPts(idx);
-                    ctx.beginPath();
-                    ctx.lineWidth = 6;
-                    ctx.strokeStyle = colors[idx % colors.length] + '60'; // 60% 투명도 (Hex 60)
-                    ctx.moveTo(pts[0].x, pts[0].y);
-                    for(let i=1; i<pts.length; i++) {
-                        ctx.lineTo(pts[i].x, pts[i].y);
-                    }
-                    ctx.stroke();
-                }
-            });
-        }
-    }
-
-    function buildPathPts(startCol) {
-        let pts = [];
-        let curCol = startCol;
-        pts.push({ x: colSpacing*(curCol+0.5), y: 0 });
-        
-        (localData.lines || []).forEach(l => {
-            if (l.col === curCol) {
-                pts.push({ x: colSpacing*(curCol+0.5), y: l.y*canvasHeight });
-                curCol++;
-                pts.push({ x: colSpacing*(curCol+0.5), y: l.y*canvasHeight });
-            } else if (l.col === curCol - 1) {
-                pts.push({ x: colSpacing*(curCol+0.5), y: l.y*canvasHeight });
-                curCol--;
-                pts.push({ x: colSpacing*(curCol+0.5), y: l.y*canvasHeight });
-            }
-        });
-        pts.push({ x: colSpacing*(curCol+0.5), y: canvasHeight });
-        return pts;
-    }
-
-    function getPathData(pts) {
-        let total = 0;
-        let segments = [];
-        for(let i=0; i<pts.length-1; i++) {
-            let dist = Math.hypot(pts[i+1].x - pts[i].x, pts[i+1].y - pts[i].y);
-            total += dist;
-            segments.push({ p1: pts[i], p2: pts[i+1], dist });
-        }
-        return { total, segments };
-    }
-
-    function startSingleAnimation(idx, data) {
-        if(isAnimating) return;
-        isAnimating = true;
-        currentlyAnimatingPlayer = idx;
-
-        const pts = buildPathPts(idx);
-        const pData = getPathData(pts);
-        
-        let currentDist = 0;
-        const speed = canvasHeight * 0.018; 
-
-        function animLoop() {
-            currentDist += speed;
-            if(currentDist >= pData.total) currentDist = pData.total;
-
-            drawBaseLadderWithPlayed(data);
-
-            ctx.beginPath();
-            ctx.lineWidth = 6;
-            ctx.strokeStyle = colors[idx % colors.length];
-            
-            let distLeft = currentDist;
-            let lastX = pData.segments[0].p1.x, lastY = pData.segments[0].p1.y;
-            ctx.moveTo(lastX, lastY);
-
-            for(let seg of pData.segments) {
-                if (distLeft >= seg.dist) {
-                    ctx.lineTo(seg.p2.x, seg.p2.y);
-                    distLeft -= seg.dist;
-                    lastX = seg.p2.x; lastY = seg.p2.y;
-                } else {
-                    const ratio = distLeft / seg.dist;
-                    lastX = seg.p1.x + (seg.p2.x - seg.p1.x)*ratio;
-                    lastY = seg.p1.y + (seg.p2.y - seg.p1.y)*ratio;
-                    ctx.lineTo(lastX, lastY);
-                    break;
-                }
-            }
-            ctx.stroke();
-
-            ctx.fillStyle = '#fff';
-            ctx.beginPath();
-            ctx.arc(lastX, lastY, 6, 0, Math.PI*2);
-            ctx.fill();
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = colors[idx % colors.length];
-            ctx.stroke();
-
-            if (currentDist >= pData.total) {
-                isAnimating = false;
-                currentlyAnimatingPlayer = null;
-                
-                const wasMyTrigger = (myTriggeredPlayer === idx);
-
-                if (wasMyTrigger) {
-                    myTriggeredPlayer = null;
-                    roomRef.update({ activePlayer: null });
-                }
-
-                // 전체가 끝났는지 검사 (마지막 진행자도 호출하도록 변경)
-                if (data.played && !data.played.includes(false)) {
-                    // 모두 끝났으면 status 변경 (방장이거나 현재 궤적을 끝낸 '나')
-                    if (isAdmin || wasMyTrigger) {
-                        roomRef.update({ status: 'finished' });
-                    }
-                }
-
-            } else {
-                requestAnimationFrame(animLoop);
-            }
-        }
-        animLoop();
-    }
-
-    function showResultModal(matches) {
-        resultTableBody.innerHTML = '';
-        matches.forEach(m => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `<td><b>${m.player}</b></td><td>${m.result}</td>`;
-            resultTableBody.appendChild(tr);
-        });
-        resultModal.style.display = 'flex';
-    }
-
-    document.getElementById('close-modal-btn').addEventListener('click', () => {
-        resultModal.style.display = 'none';
-        drawBaseLadderWithPlayed(localData); 
-    });
-
-    document.getElementById('restart-game-btn').addEventListener('click', () => {
-        roomRef.remove().catch(e => alert(e.message));
-        resultModal.style.display = 'none';
-    });
-
-    document.getElementById('copy-result-btn').addEventListener('click', () => {
-        const text = localData.finalMatches.map(m => `${m.player} : ${m.result}`).join('\n');
-        navigator.clipboard.writeText("🌸 웹 사다리타기 결과 🌸\n" + text).then(() => {
-            alert('클립보드에 결과가 복사되었습니다!');
-        });
-    });
-
-});
+    <script src="script.js"></script>
+</body>
+</html>
