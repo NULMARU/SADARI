@@ -220,7 +220,6 @@ document.addEventListener('DOMContentLoaded', () => {
         playerCountInput.value = count;
         playersContainer.innerHTML = '<h3>참가자</h3>';
         resultsContainer.innerHTML = '<h3>결과</h3>';
-        const defaultResults = ['당첨 😎', '꽝 😭', '선발대 🏃', '교육참석 📚', '간식쏘기 🍕', '휴식 ☕', '꽝 😭', '당첨 😎', '선발대 🏃', '꽝 😭'];
 
         for (let i = 0; i < count; i++) {
             playersContainer.innerHTML += `
@@ -228,11 +227,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span>${i+1}</span>
                     <input type="text" id="player-${i}" value="참가자 ${i+1}">
                 </div>`;
-            const defRes = defaultResults[i % defaultResults.length];
             resultsContainer.innerHTML += `
                 <div class="input-row">
                     <span>${i+1}</span>
-                    <input type="text" id="result-${i}" value="${defRes}">
+                    <input type="text" id="result-${i}" value="">
                 </div>`;
         }
     }
