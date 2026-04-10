@@ -139,13 +139,28 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.onload = (ev) => {
             const buffer = ev.target.result;
 
-            let text;
-            try {
-                // 1. 우선 보편적인 UTF-8 시도 (fatal: true 이므로 깨진 바이트 존재 시 즉시 에러 발생)
-                text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-            } catch (err) {
-                // 2. 에러가 발생한 경우(한글 엑셀 기본 저장방식 CP949인 경우 등), 호환성이 높은 EUC-KR로 안전하게 디코딩
-                text = new TextDecoder('euc-kr').decode(buffer);
+            const uint8Array = new Uint8Array(buffer);
+            let text = '';
+
+            // BOM 확인 (Excel에서 저장한 UTF-8 CSV나 UTF-16 텍스트 파일 처리)
+            const isUtf16Le = uint8Array.length >= 2 && uint8Array[0] === 0xFF && uint8Array[1] === 0xFE;
+            const isUtf16Be = uint8Array.length >= 2 && uint8Array[0] === 0xFE && uint8Array[1] === 0xFF;
+            const isUtf8Bom = uint8Array.length >= 3 && uint8Array[0] === 0xEF && uint8Array[1] === 0xBB && uint8Array[2] === 0xBF;
+
+            if (isUtf16Le) {
+                text = new TextDecoder('utf-16le').decode(buffer);
+            } else if (isUtf16Be) {
+                text = new TextDecoder('utf-16be').decode(buffer);
+            } else if (isUtf8Bom) {
+                text = new TextDecoder('utf-8').decode(buffer);
+            } else {
+                try {
+                    // 1. 우선 보편적인 UTF-8 시도 (fatal: true 이므로 깨진 바이트 존재 시 즉시 에러 발생)
+                    text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+                } catch (err) {
+                    // 2. 에러가 발생한 경우(한글 엑셀 기본 저장방식 CP949인 경우 등), 호환성이 높은 EUC-KR로 안전하게 디코딩
+                    text = new TextDecoder('euc-kr').decode(buffer);
+                }
             }
             
             // 공통 BOM 제거
