@@ -1,542 +1,155 @@
-const firebaseConfig = {
-    apiKey: "AIzaSyCq1xjPaoUX6RY1_HpTUivo69lWXWuNqKQ",
-    authDomain: "sadari-1b34d.firebaseapp.com",
-    projectId: "sadari-1b34d",
-    storageBucket: "sadari-1b34d.firebasestorage.app",
-    messagingSenderId: "576169886908",
-    appId: "1:576169886908:web:9661f1c92117027a60bcb9",
-    databaseURL: "https://sadari-1b34d-default-rtdb.firebaseio.com"
-};
-
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-const roomRef = db.ref('room');
-
-document.addEventListener('DOMContentLoaded', () => {
-    const configSection = document.getElementById('config-section');
-    const gameSection = document.getElementById('game-section');
-    const playerCountInput = document.getElementById('player-count');
-    const playersContainer = document.getElementById('players-inputs');
-    const resultsContainer = document.getElementById('results-inputs');
-    const csvUploadInput = document.getElementById('csv-upload');
-    const downloadCsvBtn = document.getElementById('download-csv-btn');
-
-    // UI Elements
-    const statusText = document.getElementById('room-status-text');
-    const gameHeader = document.getElementById('game-header');
-    const startsContainer = document.getElementById('starts-container');
-    const endsContainer = document.getElementById('ends-container');
-    const adminControls = document.getElementById('admin-controls');
-    
-    // Canvas
-    const canvas = document.getElementById('ladder-canvas');
-    const ctx = canvas.getContext('2d');
-
-    const resultModal = document.getElementById('result-modal');
-    const resultTableBody = document.querySelector('#result-table tbody');
-    const forceResetBtn = document.getElementById('btn-force-reset');
-
-    if (forceResetBtn) {
-        forceResetBtn.addEventListener('click', () => {
-            if(confirm("기존 게임 방을 삭제하고 새로 만드시겠습니까?")) {
-                roomRef.remove().catch(e => alert(e.message));
-            }
-        });
+'use strict';
+const $ = id => document.getElementById(id);
+const colors = ['#d4fc50','#8cbdff','#ff9986','#c8a1ff','#65d8bb','#ffe582','#f0a4d6','#89d7ed','#dfb184','#9bd9a5'];
+const draft = Array.from({ length: 10 }, (_, i) => ({ player: '', result: '' }));
+let count = 4, latest = {room:null,isHost:false}, connected = false, busy = false, serverOffset = 0;
+let pollTimer, toastTimer, requestSeq = 0, acceptedSeq = 0, modalRound = null, boardKey = '', animationFrame = 0;
+const canvas = $('ladder-canvas'), ctx = canvas.getContext('2d');
+let width = 0, height = 0;
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+function toast(message) { clearTimeout(toastTimer); $('toast').textContent = message; $('toast').hidden = false; toastTimer = setTimeout(() => $('toast').hidden = true, 3800); }
+function error(message) { $('error-message').textContent = message; $('error-banner').hidden = false; }
+function setConnected(value) { connected = value; $('connection').className = 'connection ' + (value ? 'online' : 'offline'); $('connection-text').textContent = value ? '실시간 연결' : '연결 확인 중'; refreshButtons(); }
+function refreshButtons() {
+  $('create-btn').disabled = busy || !connected;
+  $('count-minus').disabled = count <= 2 || busy;
+  $('count-plus').disabled = count >= 10 || busy;
+  for (const id of ['start-btn','skip-btn','reset-btn','confirm-reset']) $(id).disabled = busy || !connected;
+  document.querySelectorAll('.start-node.ready').forEach(el => el.disabled = busy || !connected);
+}
+function forms() {
+  $('player-count').value = count;
+  $('form-rows').replaceChildren();
+  for (let i = 0; i < count; i++) {
+    const row = document.createElement('div'); row.className = 'input-row';
+    const number = document.createElement('span'); number.className = 'slot-number'; number.textContent = String(i + 1).padStart(2,'0'); row.append(number);
+    for (const field of ['player','result']) {
+      const input = document.createElement('input'); input.type = 'text'; input.maxLength = 24; input.value = draft[i][field]; input.autocomplete = 'off';
+      input.id = `${field}-${i}`; input.setAttribute('aria-label', `${i+1}번 ${field === 'player' ? '참가자 이름' : '결과'}`);
+      input.placeholder = field === 'player' ? `참가자 ${i+1}` : ['커피 당첨','통과!','통과!','간식 당첨'][i%4];
+      input.addEventListener('input', () => { draft[i][field] = input.value; if (!latest.room) drawBoard(true); }); row.append(input);
     }
-    
-    const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB', '#F1C40F', '#E67E22'];
-    const lineColor = '#ffd1f3';
-    
-    let localData = null;
-    let canvasWidth, canvasHeight, colSpacing;
-    let isAdmin = true;
-
-    let isAnimating = false;
-    let currentlyAnimatingPlayer = null;
-    let myTriggeredPlayer = null;
-
-    // --- Firebase Sync ---
-    roomRef.on('value', (snapshot) => {
-        const data = snapshot.val();
-        if (!data) {
-            statusText.innerText = "새 게임 방을 생성해주세요.";
-            if (forceResetBtn) forceResetBtn.style.display = 'none';
-            configSection.style.display = 'flex';
-            gameSection.style.display = 'none';
-            resultModal.style.display = 'none';
-            updateForms(); 
-            isAnimating = false;
-            currentlyAnimatingPlayer = null;
-            myTriggeredPlayer = null;
-        } else {
-            localData = data;
-            configSection.style.display = 'none';
-            gameSection.style.display = 'block';
-
-            adminControls.style.display = 'block';
-            if (forceResetBtn) forceResetBtn.style.display = 'none';
-            
-            if (data.status === 'waiting') {
-                document.getElementById('start-game-btn').style.display = 'inline-block';
-                document.getElementById('force-finish-btn').style.display = 'none';
-            } else if (data.status === 'playing') {
-                document.getElementById('start-game-btn').style.display = 'none';
-                document.getElementById('force-finish-btn').style.display = 'inline-block';
-            } else {
-                document.getElementById('start-game-btn').style.display = 'none';
-                document.getElementById('force-finish-btn').style.display = 'none';
-            }
-            
-            if (data.status === 'waiting') {
-                statusText.innerText = "참가자들이 대기 중입니다!";
-                gameHeader.innerText = "현재 사다리가 세팅되었습니다. 방장의 오픈을 기다려주세요.";
-                setupLadderBoard(data);
-                drawBaseLadderWithPlayed(data);
-            } 
-            else if (data.status === 'playing') {
-                statusText.innerText = "릴레이 사다리 진행 중! 🚀";
-                gameHeader.innerText = "내 이름표를 클릭해서 사다리를 출발하세요!";
-                setupLadderBoard(data); // Re-render nodes (to disable played ones)
-                
-                if (data.activePlayer !== undefined && data.activePlayer !== null) {
-                    if (currentlyAnimatingPlayer !== data.activePlayer) {
-                        startSingleAnimation(data.activePlayer, data);
-                    }
-                } else {
-                    if (!isAnimating) drawBaseLadderWithPlayed(data);
-                }
-            }
-            else if (data.status === 'finished') {
-                statusText.innerText = "모든 릴레이 종료!";
-                gameHeader.innerText = "모두의 게임이 종료되었습니다.";
-                setupLadderBoard(data);
-                drawBaseLadderWithPlayed(data);
-                showResultModal(data.finalMatches);
-            }
-        }
-    }, (error) => {
-        statusText.innerText = "데이터 접근 권한 에러: " + (error.message || error);
-    });
-
-    if(downloadCsvBtn) {
-        downloadCsvBtn.addEventListener('click', () => {
-            const csvContent = "\uFEFF이름,결과\n참가자1,당첨 😎\n참가자2,꽝 😭\n참가자3,꽝 😭\n참가자4,선발대 🏃\n참가자5,휴식 ☕";
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
-            link.setAttribute("href", URL.createObjectURL(blob));
-            link.setAttribute("download", "사다리타기_명단양식.csv");
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        });
+    $('form-rows').append(row);
+  }
+  refreshButtons(); if (!latest.room) drawBoard(true);
+}
+function preview() {
+  return { players: draft.slice(0,count).map((p,i)=>p.player.trim() || `참가자 ${i+1}`), results:draft.slice(0,count).map((p,i)=>p.result.trim() || ['커피 당첨','통과!','통과!','간식 당첨'][i%4]), lines:Array.from({length:count*2},(_,i)=>({col:i%(count-1),y:(i+1)/(count*2+1)})), played:Array(count).fill(false), status:'preview', active:null };
+}
+function applyState(data, seq) {
+  if (seq < acceptedSeq) return;
+  acceptedSeq = seq; latest = data; serverOffset = data.serverNow - Date.now();
+  setConnected(true); $('error-banner').hidden = true;
+  const room = data.room;
+  $('setup-panel').hidden = !!room; $('room-panel').hidden = !room;
+  document.querySelector('.workspace').classList.toggle('room-live', !!room);
+  $('role-tag').textContent = !room ? '게임 준비' : data.isHost ? '방장' : '참가자';
+  if (room) {
+    const labels = {waiting:'팀원들을 초대하세요',playing:'지금, 운을 확인할 시간',finished:'모두의 선택이 끝났어요'};
+    $('room-title').textContent = labels[room.status];
+    $('room-description').textContent = data.isHost ? (room.status === 'waiting' ? '팀원이 모이면 사다리를 열어 주세요.' : '게임 시작과 종료는 방장만 할 수 있어요.') : '보드에서 내 이름을 눌러 참여하세요.';
+    $('host-actions').hidden = !data.isHost;
+    $('start-btn').hidden = room.status !== 'waiting'; $('skip-btn').hidden = room.status !== 'playing';
+    $('guest-note').hidden = data.isHost || room.status === 'finished';
+    $('guest-note').textContent = room.status === 'waiting' ? '방장이 게임을 시작하면 내 이름을 눌러 주세요.' : room.active ? '다른 참가자가 진행 중이에요. 잠시만 기다려 주세요.' : '위 보드에서 내 이름을 눌러 주세요.';
+    $('results-btn').hidden = room.status !== 'finished';
+    $('restart-game-btn').hidden = !data.isHost;
+    const rosterKey = room.roundId + ':' + room.version;
+    if ($('roster').dataset.key !== rosterKey) {
+      $('roster').dataset.key = rosterKey; $('roster').replaceChildren();
+      room.players.forEach((name,i)=>{
+        const row = document.createElement('div'); row.className='roster-item'+(room.active?.index===i?' active':''); row.style.setProperty('--player-color',colors[i]);
+        const avatar=document.createElement('span');avatar.className='avatar';avatar.textContent=String(i+1).padStart(2,'0');
+        const label=document.createElement('span');label.className='roster-name';label.textContent=name;label.title=name;
+        const status=document.createElement('span');status.className='roster-status';status.textContent=room.active?.index===i?'진행 중':room.played[i]?'완료':'대기';row.append(avatar,label,status);$('roster').append(row);
+      });
     }
-
-    csvUploadInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            const buffer = ev.target.result;
-
-            const uint8Array = new Uint8Array(buffer);
-            let text = '';
-
-            // BOM 확인 (Excel에서 저장한 UTF-8 CSV나 UTF-16 텍스트 파일 처리)
-            const isUtf16Le = uint8Array.length >= 2 && uint8Array[0] === 0xFF && uint8Array[1] === 0xFE;
-            const isUtf16Be = uint8Array.length >= 2 && uint8Array[0] === 0xFE && uint8Array[1] === 0xFF;
-            const isUtf8Bom = uint8Array.length >= 3 && uint8Array[0] === 0xEF && uint8Array[1] === 0xBB && uint8Array[2] === 0xBF;
-
-            if (isUtf16Le) {
-                text = new TextDecoder('utf-16le').decode(buffer);
-            } else if (isUtf16Be) {
-                text = new TextDecoder('utf-16be').decode(buffer);
-            } else if (isUtf8Bom) {
-                text = new TextDecoder('utf-8').decode(buffer);
-            } else {
-                try {
-                    // 1. 우선 보편적인 UTF-8 시도 (fatal: true 이므로 깨진 바이트 존재 시 즉시 에러 발생)
-                    text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-                } catch (err) {
-                    // 2. 에러가 발생한 경우(한글 엑셀 기본 저장방식 CP949인 경우 등), 호환성이 높은 EUC-KR로 안전하게 디코딩
-                    text = new TextDecoder('euc-kr').decode(buffer);
-                }
-            }
-            
-            // 공통 BOM 제거
-            text = text.replace(/^\uFEFF/, '');
-
-            const rows = text.split(/\r?\n/).map(r => r.trim()).filter(r => r.length > 0);
-            
-            // 헤더 행 제외 (더 관대하게)
-            let actualRows = rows.filter(r => {
-                const lower = r.toLowerCase().replace(/\s+/g, '');
-                return !(lower.includes('이름') && lower.includes('결과'));
-            });
-
-            let count = Math.min(Math.max(actualRows.length, 2), 10);
-            playerCountInput.value = count;
-            updateForms();
-
-            // 행 파싱 함수 (콤마 / 탭 / 공백 모두 지원)
-            function parseRow(row) {
-                // 1. 쉼표 구분
-                let parts = row.split(',');
-                if (parts.length >= 2) return parts.map(p => p.trim());
-
-                // 2. 탭 구분
-                parts = row.split('\t');
-                if (parts.length >= 2) return parts.map(p => p.trim());
-
-                // 3. 공백 구분 (가장 흔한 실패 케이스)
-                parts = row.split(/\s+/);
-                if (parts.length >= 2) {
-                    return [
-                        parts[0].trim(),
-                        parts.slice(1).join(' ').trim()
-                    ];
-                }
-
-                return [row.trim(), '']; // fallback
-            }
-
-            actualRows.slice(0, count).forEach((row, i) => {
-                const [player, result] = parseRow(row);
-                if (player) document.getElementById(`player-${i}`).value = player;
-                if (result !== undefined) document.getElementById(`result-${i}`).value = result;
-            });
-
-            csvUploadInput.value = '';
-            console.log('✅ CSV 업로드 성공');
-        };
-
-        reader.readAsArrayBuffer(file);
+    if (room.status==='finished' && modalRound!==room.roundId) { modalRound=room.roundId; showResults(); }
+    if (room.status!=='finished' && $('result-modal').open) $('result-modal').close();
+  } else {
+    modalRound=null;
+    if($('result-modal').open)$('result-modal').close();
+    if($('confirm-modal').open)$('confirm-modal').close();
+  }
+  drawBoard(); refreshButtons();
+}
+async function fetchState() {
+  const seq=++requestSeq;
+  try { const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(9000)}); const data=await response.json(); if(!response.ok)throw new Error(data.error); applyState(data,seq); }
+  catch(e){ if(seq>=acceptedSeq){setConnected(false);error(e.name==='TimeoutError'?'연결이 지연되고 있어요. 자동으로 다시 연결합니다.':e.message||'연결을 확인하고 다시 시도해 주세요.');} }
+}
+async function poll() { clearTimeout(pollTimer); await fetchState(); pollTimer=setTimeout(poll,document.hidden?4000:latest.room?.active?550:1300); }
+async function action(name,extra={}) {
+  if(busy)return false;
+  busy=true;refreshButtons(); const seq=++requestSeq;
+  try {
+    const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:name,roundId:latest.room?.roundId,...extra}),signal:AbortSignal.timeout(10000)});
+    const data=await response.json();if(!response.ok)throw new Error(data.error||'요청을 처리하지 못했어요.');applyState(data,seq);return true;
+  }catch(e){toast(e.name==='TimeoutError'?'요청 확인이 지연되고 있어요. 게임 상태를 다시 확인합니다.':e.message);await fetchState();return false;}
+  finally{busy=false;refreshButtons();}
+}
+function drawBoard(force=false) {
+  const room=latest.room||preview(), isPreview=!latest.room;
+  const key=JSON.stringify([room.roundId,room.version,isPreview?room.players:null,isPreview?room.results:null]);
+  $('stage-badge').textContent={preview:'미리보기',waiting:'참가자 대기',playing:'PLAYING',finished:'COMPLETE'}[room.status];
+  $('stage-badge').className='stage-badge '+room.status;
+  $('board-title').textContent=room.active?`${room.players[room.active.index]} 님의 차례!`:room.status==='finished'?'우리팀의 결과가 나왔어요':room.status==='playing'?'내 이름을 눌러 출발!':'누구에게 행운이 올까요?';
+  $('board-hint').textContent=isPreview?'왼쪽에서 멤버와 결과를 정하고 방을 열어 주세요.':room.status==='waiting'?'준비 완료! 방장이 사다리를 열면 시작할 수 있어요.':room.status==='finished'?'결과를 복사해 팀원들과 나눠 보세요.':room.active?'한 명씩 출발합니다. 모두 함께 지켜봐 주세요.':'내 이름을 눌러 주세요. 한 명씩 차례로 진행돼요.';
+  $('preview-label').hidden=!isPreview;
+  const completed=room.played.filter(Boolean).length;
+  $('progress-label').textContent=room.status==='playing'?'IN PROGRESS':room.status==='finished'?'COMPLETE':'READY';
+  $('progress-count').textContent=`${completed} / ${room.players.length}`;$('progress-fill').style.width=`${completed/room.players.length*100}%`;
+  if(force||key!==boardKey){
+    boardKey=key;
+    const n=room.players.length;$('board-inner').style.setProperty('--count',n);$('board-inner').style.minWidth=n>5?`${n*67}px`:'260px';
+    $('starts-container').replaceChildren();$('ends-container').replaceChildren();
+    room.players.forEach((name,i)=>{
+      const start=document.createElement('button');const ready=room.status==='playing'&&!room.played[i]&&!room.active;
+      start.className='node start-node'+(ready?' ready':'')+(room.played[i]?' played':'')+(room.active?.index===i?' active':'');start.style.setProperty('--player-color',colors[i]);start.textContent=name;start.title=name;start.setAttribute('aria-label',`${name}${room.played[i]?' 완료':' 사다리 출발'}`);start.disabled=!ready||busy||!connected;start.addEventListener('click',()=>action('play',{index:i}));$('starts-container').append(start);
+      const end=document.createElement('div');end.className='node end-node';end.textContent=room.results[i];end.title=room.results[i];$('ends-container').append(end);
     });
-
-    function updateForms() {
-        let count = parseInt(playerCountInput.value);
-        if (count < 2) count = 2;
-        if (count > 10) count = 10;
-        playerCountInput.value = count;
-        playersContainer.innerHTML = '<h3>참가자</h3>';
-        resultsContainer.innerHTML = '<h3>결과</h3>';
-
-        for (let i = 0; i < count; i++) {
-            playersContainer.innerHTML += `
-                <div class="input-row">
-                    <span>${i+1}</span>
-                    <input type="text" id="player-${i}" value="참가자 ${i+1}">
-                </div>`;
-            resultsContainer.innerHTML += `
-                <div class="input-row">
-                    <span>${i+1}</span>
-                    <input type="text" id="result-${i}" value="">
-                </div>`;
-        }
-    }
-    playerCountInput.addEventListener('change', updateForms);
-
-    document.getElementById('open-room-btn').addEventListener('click', () => {
-        const count = parseInt(playerCountInput.value);
-        let players = [], results = [];
-        for (let i = 0; i < count; i++) {
-            players.push(document.getElementById(`player-${i}`).value);
-            results.push(document.getElementById(`result-${i}`).value);
-        }
-
-        let lines = [];
-        for (let col = 0; col < count - 1; col++) {
-            let numLines = Math.floor(Math.random() * 2) + 2; 
-            for (let i = 0; i < numLines; i++) {
-                let y, valid = false, attempts = 0;
-                while(!valid && attempts < 30) {
-                    attempts++;
-                    y = 0.15 + Math.random() * 0.7; 
-                    const closeLine = lines.find(l => 
-                        (l.col === col || l.col === col - 1 || l.col === col + 1) && Math.abs(l.y - y) < 0.1
-                    );
-                    if (!closeLine) valid = true;
-                }
-                if (valid) lines.push({ col, y });
-            }
-        }
-        lines.sort((a,b) => a.y - b.y);
-
-        let finalMatches = [];
-        for(let start = 0; start < count; start++) {
-            let c = start;
-            lines.forEach(l => {
-                if (l.col === c) c++;
-                else if (l.col === c - 1) c--;
-            });
-            finalMatches.push({ player: players[start], result: results[c] });
-        }
-
-        isAdmin = true; 
-        localStorage.setItem('sadari_admin', 'true');
-        
-        roomRef.set({
-            status: 'waiting',
-            players,
-            results,
-            lines: lines.length ? lines : false,
-            lineCount: count,
-            finalMatches,
-            played: new Array(count).fill(false),
-            activePlayer: null
-        }).catch(e => alert("방 생성 실패: " + e.message));
-    });
-
-    document.getElementById('start-game-btn').addEventListener('click', () => {
-        roomRef.update({ status: 'playing' }).catch(e => alert(e.message));
-    });
-
-    document.getElementById('force-finish-btn').addEventListener('click', () => {
-        let allPlayed = new Array(localData.lineCount).fill(true);
-        roomRef.update({ status: 'finished', played: allPlayed, activePlayer: null }).catch(e => alert(e.message));
-    });
-
-    document.getElementById('reset-game-btn').addEventListener('click', () => {
-        roomRef.remove().catch(e => alert(e.message));
-    });
-
-    function setupLadderBoard(data) {
-        startsContainer.innerHTML = '';
-        endsContainer.innerHTML = '';
-        data.players.forEach((p, idx) => {
-            const el = document.createElement('div');
-            el.className = 'start-node';
-            el.innerText = p;
-            
-            if (data.played && data.played[idx]) {
-                // 이미 탄 사람
-                el.style.backgroundColor = '#f0f0f0';
-                el.style.color = '#999';
-                el.style.borderBottom = `4px solid ${colors[idx % colors.length]}50`; // 반투명
-                el.style.boxShadow = 'none';
-                el.style.cursor = 'default';
-            } else {
-                // 안 탄 사람
-                el.style.borderBottom = `4px solid ${colors[idx % colors.length]}`;
-                el.style.cursor = 'pointer';
-                el.addEventListener('click', () => {
-                    if (localData.status !== 'playing') return;
-                    if (localData.activePlayer !== undefined && localData.activePlayer !== null) {
-                        alert("다른 분이 방금 사다리를 출발시켰습니다! 잠시만 기다려주세요 👀🍿");
-                        return;
-                    }
-                    if (localData.played && localData.played[idx]) return;
-
-                    myTriggeredPlayer = idx;
-                    let newPlayed = [...(localData.played || [])];
-                    newPlayed[idx] = true;
-                    
-                    roomRef.update({ 
-                        activePlayer: idx,
-                        played: newPlayed
-                    });
-                });
-            }
-            startsContainer.appendChild(el);
-        });
-
-        data.results.forEach((r, idx) => {
-            const el = document.createElement('div');
-            el.className = 'end-node';
-            el.innerText = r;
-            endsContainer.appendChild(el);
-        });
-        resizeCanvas(data.lineCount);
-    }
-
-    function resizeCanvas(count) {
-        const dpr = window.devicePixelRatio || 1;
-        const rect = canvas.parentElement.getBoundingClientRect();
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
-        ctx.scale(dpr, dpr);
-        canvasWidth = rect.width;
-        canvasHeight = rect.height;
-        colSpacing = canvasWidth / count;
-    }
-
-    let resizeTimer;
-    window.addEventListener('resize', () => {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-            if (localData) {
-                resizeCanvas(localData.lineCount);
-                if(!isAnimating) drawBaseLadderWithPlayed(localData);
-            }
-        }, 150);
-    });
-
-    function drawBaseLadderWithPlayed(data) {
-        if(!localData) return;
-        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = lineColor;
-        ctx.lineCap = 'round';
-        
-        for (let i = 0; i < localData.lineCount; i++) {
-            const x = colSpacing * (i + 0.5);
-            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvasHeight); ctx.stroke();
-        }
-        (localData.lines || []).forEach(line => {
-            const x1 = colSpacing * (line.col + 0.5);
-            const x2 = colSpacing * (line.col + 1.5);
-            const y = line.y * canvasHeight;
-            ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke();
-        });
-
-        // 궤적을 이미 남긴 플레이어의 선을 반투명하게 덧그림
-        if (data.played) {
-            data.played.forEach((isPlayed, idx) => {
-                if (isPlayed && idx !== currentlyAnimatingPlayer) {
-                    const pts = buildPathPts(idx);
-                    ctx.beginPath();
-                    ctx.lineWidth = 6;
-                    ctx.strokeStyle = colors[idx % colors.length] + '60'; // 60% 투명도 (Hex 60)
-                    ctx.moveTo(pts[0].x, pts[0].y);
-                    for(let i=1; i<pts.length; i++) {
-                        ctx.lineTo(pts[i].x, pts[i].y);
-                    }
-                    ctx.stroke();
-                }
-            });
-        }
-    }
-
-    function buildPathPts(startCol) {
-        let pts = [];
-        let curCol = startCol;
-        pts.push({ x: colSpacing*(curCol+0.5), y: 0 });
-        
-        (localData.lines || []).forEach(l => {
-            if (l.col === curCol) {
-                pts.push({ x: colSpacing*(curCol+0.5), y: l.y*canvasHeight });
-                curCol++;
-                pts.push({ x: colSpacing*(curCol+0.5), y: l.y*canvasHeight });
-            } else if (l.col === curCol - 1) {
-                pts.push({ x: colSpacing*(curCol+0.5), y: l.y*canvasHeight });
-                curCol--;
-                pts.push({ x: colSpacing*(curCol+0.5), y: l.y*canvasHeight });
-            }
-        });
-        pts.push({ x: colSpacing*(curCol+0.5), y: canvasHeight });
-        return pts;
-    }
-
-    function getPathData(pts) {
-        let total = 0;
-        let segments = [];
-        for(let i=0; i<pts.length-1; i++) {
-            let dist = Math.hypot(pts[i+1].x - pts[i].x, pts[i+1].y - pts[i].y);
-            total += dist;
-            segments.push({ p1: pts[i], p2: pts[i+1], dist });
-        }
-        return { total, segments };
-    }
-
-    function startSingleAnimation(idx, data) {
-        if(isAnimating) return;
-        isAnimating = true;
-        currentlyAnimatingPlayer = idx;
-
-        const pts = buildPathPts(idx);
-        const pData = getPathData(pts);
-        
-        let currentDist = 0;
-        const speed = canvasHeight * 0.018; 
-
-        function animLoop() {
-            currentDist += speed;
-            if(currentDist >= pData.total) currentDist = pData.total;
-
-            drawBaseLadderWithPlayed(data);
-
-            ctx.beginPath();
-            ctx.lineWidth = 6;
-            ctx.strokeStyle = colors[idx % colors.length];
-            
-            let distLeft = currentDist;
-            let lastX = pData.segments[0].p1.x, lastY = pData.segments[0].p1.y;
-            ctx.moveTo(lastX, lastY);
-
-            for(let seg of pData.segments) {
-                if (distLeft >= seg.dist) {
-                    ctx.lineTo(seg.p2.x, seg.p2.y);
-                    distLeft -= seg.dist;
-                    lastX = seg.p2.x; lastY = seg.p2.y;
-                } else {
-                    const ratio = distLeft / seg.dist;
-                    lastX = seg.p1.x + (seg.p2.x - seg.p1.x)*ratio;
-                    lastY = seg.p1.y + (seg.p2.y - seg.p1.y)*ratio;
-                    ctx.lineTo(lastX, lastY);
-                    break;
-                }
-            }
-            ctx.stroke();
-
-            ctx.fillStyle = '#fff';
-            ctx.beginPath();
-            ctx.arc(lastX, lastY, 6, 0, Math.PI*2);
-            ctx.fill();
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = colors[idx % colors.length];
-            ctx.stroke();
-
-            if (currentDist >= pData.total) {
-                isAnimating = false;
-                currentlyAnimatingPlayer = null;
-                
-                const wasMyTrigger = (myTriggeredPlayer === idx);
-
-                if (wasMyTrigger) {
-                    myTriggeredPlayer = null;
-                    roomRef.update({ activePlayer: null });
-                }
-
-                // 전체가 끝났는지 검사 (마지막 진행자도 호출하도록 변경)
-                if (data.played && !data.played.includes(false)) {
-                    // 모두 끝났으면 status 변경 (방장이거나 현재 궤적을 끝낸 '나')
-                    if (isAdmin || wasMyTrigger) {
-                        roomRef.update({ status: 'finished' });
-                    }
-                }
-
-            } else {
-                requestAnimationFrame(animLoop);
-            }
-        }
-        animLoop();
-    }
-
-    function showResultModal(matches) {
-        resultTableBody.innerHTML = '';
-        matches.forEach(m => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `<td><b>${m.player}</b></td><td>${m.result}</td>`;
-            resultTableBody.appendChild(tr);
-        });
-        resultModal.style.display = 'flex';
-    }
-
-    document.getElementById('close-modal-btn').addEventListener('click', () => {
-        resultModal.style.display = 'none';
-        drawBaseLadderWithPlayed(localData); 
-    });
-
-    document.getElementById('restart-game-btn').addEventListener('click', () => {
-        roomRef.remove().catch(e => alert(e.message));
-        resultModal.style.display = 'none';
-    });
-
-    document.getElementById('copy-result-btn').addEventListener('click', () => {
-        const text = localData.finalMatches.map(m => `${m.player} : ${m.result}`).join('\n');
-        navigator.clipboard.writeText("🌸 웹 사다리타기 결과 🌸\n" + text).then(() => {
-            alert('클립보드에 결과가 복사되었습니다!');
-        });
-    });
-
-});
+    measure();
+  }
+  cancelAnimationFrame(animationFrame);paint();
+}
+function measure(){const rect=canvas.getBoundingClientRect(),dpr=Math.min(window.devicePixelRatio||1,2);width=rect.width;height=rect.height;canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);}
+function x(col,n){return (width/n)*(col+.5);}
+function pathFor(room,start){let col=start;const pts=[{x:x(col,room.players.length),y:0}];for(const line of room.lines){if(line.col===col||line.col===col-1){pts.push({x:x(col,room.players.length),y:line.y*height});col+=line.col===col?1:-1;pts.push({x:x(col,room.players.length),y:line.y*height});}}pts.push({x:x(col,room.players.length),y:height});return pts;}
+function strokePath(pts,color,progress=1,glow=false){
+  const lengths=pts.slice(1).map((p,i)=>Math.hypot(p.x-pts[i].x,p.y-pts[i].y));let remaining=lengths.reduce((a,b)=>a+b,0)*progress;
+  ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);let tip=pts[0];
+  for(let i=0;i<lengths.length;i++){const fraction=Math.min(1,remaining/lengths[i]);tip={x:pts[i].x+(pts[i+1].x-pts[i].x)*fraction,y:pts[i].y+(pts[i+1].y-pts[i].y)*fraction};ctx.lineTo(tip.x,tip.y);remaining-=lengths[i];if(remaining<=0)break;}
+  ctx.strokeStyle=color;ctx.lineWidth=glow?4:3;ctx.lineJoin='round';ctx.lineCap='round';ctx.shadowBlur=glow?13:0;ctx.shadowColor=color;ctx.stroke();ctx.shadowBlur=0;
+  if(glow){ctx.fillStyle=color;ctx.beginPath();ctx.arc(tip.x,tip.y,6,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(tip.x,tip.y,2.5,0,Math.PI*2);ctx.fill();}
+}
+function paint(){
+  const room=latest.room||preview();ctx.clearRect(0,0,width,height);ctx.lineWidth=2;ctx.strokeStyle='#455052';ctx.lineCap='round';
+  for(let i=0;i<room.players.length;i++){ctx.beginPath();ctx.moveTo(x(i,room.players.length),0);ctx.lineTo(x(i,room.players.length),height);ctx.stroke();}
+  for(const l of room.lines){ctx.beginPath();ctx.moveTo(x(l.col,room.players.length),l.y*height);ctx.lineTo(x(l.col+1,room.players.length),l.y*height);ctx.stroke();}
+  room.played.forEach((played,i)=>{if(played)strokePath(pathFor(room,i),colors[i]+'90');});
+  if(!latest.room){for(let i=0;i<Math.min(count,4);i++)strokePath(pathFor(room,i),colors[i]+'24');}
+  if(room.active){const now=Date.now()+serverOffset;const progress=Math.max(0,Math.min(1,(now-room.active.startAt)/(room.active.endAt-room.active.startAt)));strokePath(pathFor(room,room.active.index),colors[room.active.index],reducedMotion.matches?1:progress,true);const remaining=Math.max(0,(room.active.endAt-now)/1000);$('active-caption').textContent=`${room.players[room.active.index]} 님 진행 중 · ${remaining>0?remaining.toFixed(1)+'초':'결과 확인 중'}`;animationFrame=requestAnimationFrame(paint);}
+  else $('active-caption').textContent=room.status==='finished'?'모든 참가자의 결과가 확정되었어요.':room.status==='playing'?'이름표를 눌러 다음 사다리를 출발하세요.':'우리팀의 선택을 기다리는 중';
+}
+function showResults(){const room=latest.room;if(!room||room.status!=='finished')return;$('result-list').replaceChildren();room.matches.forEach((match,i)=>{if(!match)return;const row=document.createElement('div');row.className='result-row';const avatar=document.createElement('span');avatar.className='avatar';avatar.style.setProperty('--player-color',colors[i]);avatar.textContent=String(i+1).padStart(2,'0');const name=document.createElement('span');name.textContent=match.player;const result=document.createElement('strong');result.textContent=match.result;row.append(avatar,name,result);$('result-list').append(row);});$('restart-game-btn').hidden=!latest.isHost;if(!$('result-modal').open)$('result-modal').showModal();}
+async function copy(text,message){try{await navigator.clipboard.writeText(text);toast(message);}catch{const area=document.createElement('textarea');area.value=text;area.style.position='fixed';area.style.opacity='0';document.body.append(area);area.select();const success=document.execCommand('copy');area.remove();toast(success?message:'복사를 허용하거나 주소창의 링크를 직접 복사해 주세요.');}}
+function downloadTemplate(){const csv='\uFEFF이름,결과\r\n참가자 1,커피 당첨\r\n참가자 2,통과!\r\n참가자 3,통과!\r\n참가자 4,간식 당첨\r\n';const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='사다리타기_명단양식.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function parseCsv(text){const delim=text.split(/\r?\n/,1)[0].includes('\t')?'\t':',';const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++;}else quoted=!quoted;}else if(c===delim&&!quoted){row.push(cell.trim());cell='';}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell.trim());if(row.some(Boolean))rows.push(row);row=[];cell='';}else cell+=c;}if(quoted)throw new Error('CSV의 따옴표가 닫히지 않았습니다. 양식을 확인해 주세요.');row.push(cell.trim());if(row.some(Boolean))rows.push(row);if(rows[0]?.[0]==='이름'&&rows[0]?.[1]==='결과')rows.shift();return rows;}
+async function importCsv(file){if(!file)return;try{if(file.size>100000)throw new Error('CSV는 100KB 이하로 올려 주세요.');const buffer=await file.arrayBuffer(),bytes=new Uint8Array(buffer);let text;if(bytes[0]===255&&bytes[1]===254)text=new TextDecoder('utf-16le').decode(buffer);else if(bytes[0]===254&&bytes[1]===255)text=new TextDecoder('utf-16be').decode(buffer);else{try{text=new TextDecoder('utf-8',{fatal:true}).decode(buffer);}catch{text=new TextDecoder('euc-kr').decode(buffer);}}const rows=parseCsv(text.replace(/^\uFEFF/,''));if(rows.length<2||rows.length>10)throw new Error('명단은 2~10명으로 작성해 주세요.');if(rows.some(r=>r.length!==2||r.some(c=>!c||c.length>24)))throw new Error('이름과 결과를 각각 1~24자로 입력해 주세요.');count=rows.length;rows.forEach((r,i)=>{draft[i]={player:r[0],result:r[1]};});forms();toast(`${count}명의 명단을 불러왔어요.`);}catch(e){toast(e.message);}finally{$('csv-upload').value='';}}
+$('count-minus').addEventListener('click',()=>{count=Math.max(2,count-1);forms();});$('count-plus').addEventListener('click',()=>{count=Math.min(10,count+1);forms();});
+$('create-btn').addEventListener('click',async()=>{const players=draft.slice(0,count).map((p,i)=>p.player.trim()||`참가자 ${i+1}`);const results=draft.slice(0,count).map((p,i)=>p.result.trim()||['커피 당첨','통과!','통과!','간식 당첨'][i%4]);if(new Set(players).size!==players.length){toast('참가자 이름은 서로 다르게 입력해 주세요.');return;}if(await action('create',{players,results}))toast('방이 열렸어요. 초대 링크를 팀원에게 보내 주세요.');});
+$('start-btn').addEventListener('click',()=>action('start'));$('skip-btn').addEventListener('click',()=>action('skip'));
+function confirmReset(){if(latest.isHost&&!$('confirm-modal').open)$('confirm-modal').showModal();}
+$('reset-btn').addEventListener('click',confirmReset);$('restart-game-btn').addEventListener('click',()=>{$('result-modal').close();confirmReset();});$('cancel-reset').addEventListener('click',()=>$('confirm-modal').close());$('confirm-reset').addEventListener('click',async()=>{if(await action('reset')){$('confirm-modal').close();toast('새 게임을 준비해 주세요.');}});
+$('results-btn').addEventListener('click',showResults);$('close-modal-btn').addEventListener('click',()=>$('result-modal').close());
+$('copy-result-btn').addEventListener('click',()=>{if(latest.room?.status==='finished')copy('🎮 우리팀 사다리타기 결과\n'+latest.room.matches.filter(Boolean).map(m=>`${m.player} : ${m.result}`).join('\n'),'결과를 복사했어요!');});
+$('share-btn').addEventListener('click',()=>copy(location.origin+'/', '초대 링크를 복사했어요!'));
+$('upload-btn').addEventListener('click',()=>$('csv-upload').click());$('csv-upload').addEventListener('change',e=>importCsv(e.target.files[0]));$('template-btn').addEventListener('click',downloadTemplate);$('retry-btn').addEventListener('click',poll);
+let resizeTimer;new ResizeObserver(()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{measure();cancelAnimationFrame(animationFrame);paint();},50);}).observe($('board-inner'));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});window.addEventListener('online',poll);
+forms();poll();
+// WebMCP progressive enhancement: actions retain the same session and server checks.
+if(navigator.modelContext?.registerTool){
+  navigator.modelContext.registerTool({name:'sadari_state',description:'현재 사다리 게임 상태와 내 방장 여부를 확인합니다.',inputSchema:{type:'object',properties:{}},execute:async()=>({content:[{type:'text',text:JSON.stringify(latest)}]})});
+  navigator.modelContext.registerTool({name:'sadari_play',description:'진행 중인 사다리에서 지정한 참가자를 출발시킵니다. 다른 참가자가 진행 중이면 서버가 거절합니다.',inputSchema:{type:'object',properties:{index:{type:'integer',minimum:0,maximum:9,description:'참가자의 0부터 시작하는 번호'}},required:['index']},execute:async({index})=>({content:[{type:'text',text:await action('play',{index})?'출발했습니다.':'현재 출발할 수 없습니다.'}]})});
+}

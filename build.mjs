@@ -1,0 +1,10 @@
+import { readFile, writeFile, mkdir, cp } from 'node:fs/promises';
+const assets = {};
+for (const [file, type] of [['index.html', 'text/html; charset=utf-8'], ['style.css', 'text/css; charset=utf-8'], ['script.js', 'text/javascript; charset=utf-8'], ['favicon.svg', 'image/svg+xml']]) assets['/' + file] = { body: await readFile(file, 'utf8'), type };
+await mkdir('dist/server', { recursive: true });
+const source = await readFile('server/worker.js', 'utf8');
+await writeFile('dist/server/index.js', source.replace("import { assets } from './assets.js';", 'const assets = ' + JSON.stringify(assets) + ';'));
+await mkdir('dist/.openai', { recursive: true });
+await cp('.openai/hosting.json', 'dist/.openai/hosting.json');
+await cp('drizzle', 'dist/.openai/drizzle', { recursive: true });
+console.log('SADARI ARENA built: Worker, bundled assets, D1 migrations.');
