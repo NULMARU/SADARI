@@ -1,7 +1,8 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const colors = ['#d4fc50','#8cbdff','#ff9986','#c8a1ff','#65d8bb','#ffe582','#f0a4d6','#89d7ed','#dfb184','#9bd9a5'];
-const draft = Array.from({ length: 10 }, (_, i) => ({ player: '', result: '' }));
+const defaultPlayers = ['팀장', '혜', '신', '유'];
+const draft = Array.from({ length: 10 }, (_, i) => ({ player: defaultPlayers[i] || '', result: '' }));
 let count = 4, latest = {room:null,isHost:false}, connected = false, busy = false, serverOffset = 0;
 let pollTimer, toastTimer, requestSeq = 0, acceptedSeq = 0, modalRound = null, boardKey = '', animationFrame = 0;
 const canvas = $('ladder-canvas'), ctx = canvas.getContext('2d');
@@ -26,7 +27,7 @@ function forms() {
     for (const field of ['player','result']) {
       const input = document.createElement('input'); input.type = 'text'; input.maxLength = 24; input.value = draft[i][field]; input.autocomplete = 'off';
       input.id = `${field}-${i}`; input.setAttribute('aria-label', `${i+1}번 ${field === 'player' ? '참가자 이름' : '결과'}`);
-      input.placeholder = field === 'player' ? `참가자 ${i+1}` : ['커피 당첨','통과!','통과!','간식 당첨'][i%4];
+      input.placeholder = field === 'player' ? (defaultPlayers[i] || `참가자 ${i+1}`) : ['커피 당첨','통과!','통과!','간식 당첨'][i%4];
       input.addEventListener('input', () => { draft[i][field] = input.value; if (!latest.room) drawBoard(true); }); row.append(input);
     }
     $('form-rows').append(row);
@@ -34,7 +35,7 @@ function forms() {
   refreshButtons(); if (!latest.room) drawBoard(true);
 }
 function preview() {
-  return { players: draft.slice(0,count).map((p,i)=>p.player.trim() || `참가자 ${i+1}`), results:draft.slice(0,count).map((p,i)=>p.result.trim() || ['커피 당첨','통과!','통과!','간식 당첨'][i%4]), lines:Array.from({length:count*2},(_,i)=>({col:i%(count-1),y:(i+1)/(count*2+1)})), played:Array(count).fill(false), status:'preview', active:null };
+  return { players: draft.slice(0,count).map((p,i)=>p.player.trim() || (defaultPlayers[i] || `참가자 ${i+1}`)), results:draft.slice(0,count).map((p,i)=>p.result.trim() || ['커피 당첨','통과!','통과!','간식 당첨'][i%4]), lines:Array.from({length:count*2},(_,i)=>({col:i%(count-1),y:(i+1)/(count*2+1)})), played:Array(count).fill(false), status:'preview', active:null };
 }
 function applyState(data, seq) {
   if (seq < acceptedSeq) return;
@@ -133,11 +134,11 @@ function paint(){
 }
 function showResults(){const room=latest.room;if(!room||room.status!=='finished')return;$('result-list').replaceChildren();room.matches.forEach((match,i)=>{if(!match)return;const row=document.createElement('div');row.className='result-row';const avatar=document.createElement('span');avatar.className='avatar';avatar.style.setProperty('--player-color',colors[i]);avatar.textContent=String(i+1).padStart(2,'0');const name=document.createElement('span');name.textContent=match.player;const result=document.createElement('strong');result.textContent=match.result;row.append(avatar,name,result);$('result-list').append(row);});$('restart-game-btn').hidden=!latest.isHost;if(!$('result-modal').open)$('result-modal').showModal();}
 async function copy(text,message){try{await navigator.clipboard.writeText(text);toast(message);}catch{const area=document.createElement('textarea');area.value=text;area.style.position='fixed';area.style.opacity='0';document.body.append(area);area.select();const success=document.execCommand('copy');area.remove();toast(success?message:'복사를 허용하거나 주소창의 링크를 직접 복사해 주세요.');}}
-function downloadTemplate(){const csv='\uFEFF이름,결과\r\n참가자 1,커피 당첨\r\n참가자 2,통과!\r\n참가자 3,통과!\r\n참가자 4,간식 당첨\r\n';const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='사다리타기_명단양식.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function downloadTemplate(){const csv='\uFEFF이름,결과\r\n팀장,커피 당첨\r\n혜,통과!\r\n신,통과!\r\n유,간식 당첨\r\n';const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='사다리타기_명단양식.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function parseCsv(text){const delim=text.split(/\r?\n/,1)[0].includes('\t')?'\t':',';const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++;}else quoted=!quoted;}else if(c===delim&&!quoted){row.push(cell.trim());cell='';}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell.trim());if(row.some(Boolean))rows.push(row);row=[];cell='';}else cell+=c;}if(quoted)throw new Error('CSV의 따옴표가 닫히지 않았습니다. 양식을 확인해 주세요.');row.push(cell.trim());if(row.some(Boolean))rows.push(row);if(rows[0]?.[0]==='이름'&&rows[0]?.[1]==='결과')rows.shift();return rows;}
 async function importCsv(file){if(!file)return;try{if(file.size>100000)throw new Error('CSV는 100KB 이하로 올려 주세요.');const buffer=await file.arrayBuffer(),bytes=new Uint8Array(buffer);let text;if(bytes[0]===255&&bytes[1]===254)text=new TextDecoder('utf-16le').decode(buffer);else if(bytes[0]===254&&bytes[1]===255)text=new TextDecoder('utf-16be').decode(buffer);else{try{text=new TextDecoder('utf-8',{fatal:true}).decode(buffer);}catch{text=new TextDecoder('euc-kr').decode(buffer);}}const rows=parseCsv(text.replace(/^\uFEFF/,''));if(rows.length<2||rows.length>10)throw new Error('명단은 2~10명으로 작성해 주세요.');if(rows.some(r=>r.length!==2||r.some(c=>!c||c.length>24)))throw new Error('이름과 결과를 각각 1~24자로 입력해 주세요.');count=rows.length;rows.forEach((r,i)=>{draft[i]={player:r[0],result:r[1]};});forms();toast(`${count}명의 명단을 불러왔어요.`);}catch(e){toast(e.message);}finally{$('csv-upload').value='';}}
 $('count-minus').addEventListener('click',()=>{count=Math.max(2,count-1);forms();});$('count-plus').addEventListener('click',()=>{count=Math.min(10,count+1);forms();});
-$('create-btn').addEventListener('click',async()=>{const players=draft.slice(0,count).map((p,i)=>p.player.trim()||`참가자 ${i+1}`);const results=draft.slice(0,count).map((p,i)=>p.result.trim()||['커피 당첨','통과!','통과!','간식 당첨'][i%4]);if(new Set(players).size!==players.length){toast('참가자 이름은 서로 다르게 입력해 주세요.');return;}if(await action('create',{players,results}))toast('방이 열렸어요. 초대 링크를 팀원에게 보내 주세요.');});
+$('create-btn').addEventListener('click',async()=>{const players=draft.slice(0,count).map((p,i)=>p.player.trim()||(defaultPlayers[i] || `참가자 ${i+1}`));const results=draft.slice(0,count).map((p,i)=>p.result.trim()||['커피 당첨','통과!','통과!','간식 당첨'][i%4]);if(new Set(players).size!==players.length){toast('참가자 이름은 서로 다르게 입력해 주세요.');return;}if(await action('create',{players,results}))toast('방이 열렸어요. 초대 링크를 팀원에게 보내 주세요.');});
 $('start-btn').addEventListener('click',()=>action('start'));$('skip-btn').addEventListener('click',()=>action('skip'));
 function confirmReset(){if(latest.isHost&&!$('confirm-modal').open)$('confirm-modal').showModal();}
 $('reset-btn').addEventListener('click',confirmReset);$('restart-game-btn').addEventListener('click',()=>{$('result-modal').close();confirmReset();});$('cancel-reset').addEventListener('click',()=>$('confirm-modal').close());$('confirm-reset').addEventListener('click',async()=>{if(await action('reset')){$('confirm-modal').close();toast('새 게임을 준비해 주세요.');}});
@@ -153,3 +154,4 @@ if(navigator.modelContext?.registerTool){
   navigator.modelContext.registerTool({name:'sadari_state',description:'현재 사다리 게임 상태와 내 방장 여부를 확인합니다.',inputSchema:{type:'object',properties:{}},execute:async()=>({content:[{type:'text',text:JSON.stringify(latest)}]})});
   navigator.modelContext.registerTool({name:'sadari_play',description:'진행 중인 사다리에서 지정한 참가자를 출발시킵니다. 다른 참가자가 진행 중이면 서버가 거절합니다.',inputSchema:{type:'object',properties:{index:{type:'integer',minimum:0,maximum:9,description:'참가자의 0부터 시작하는 번호'}},required:['index']},execute:async({index})=>({content:[{type:'text',text:await action('play',{index})?'출발했습니다.':'현재 출발할 수 없습니다.'}]})});
 }
+
